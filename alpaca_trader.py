@@ -246,34 +246,4 @@ if __name__ == "__main__":
     print("Remember to manage your API keys securely and test thoroughly with a paper trading account first.")
     print("This script is for educational purposes and should be reviewed carefully before use with real funds.")
 
-# --- Notes on reflect_and_remember ---
-# The user's guide mentions `trading_agent.reflect_and_remember(profit_loss)`.
-# This method is not standard in the provided `TradingAgentsGraph` from the repository.
-# A simple version of this method will need to be added to `tradingagents/graph/trading_graph.py`.
-# For example:
-#
-# In tradingagents/graph/trading_graph.py, inside TradingAgentsGraph class:
-#
-# def reflect_and_remember(self, symbol, action, outcome, details=None, profit_loss=None):
-#     """
-#     A simple mechanism to record trade outcomes.
-#     In a real system, this would involve more sophisticated learning and memory updates.
-#     """
-#     memory_entry = {
-#         "timestamp": datetime.now().isoformat(),
-#         "symbol": symbol,
-#         "action": action, # e.g., 'sell', 'buy_attempt_failed'
-#         "outcome": outcome, # e.g., 'position_closed', 'insufficient_funds'
-#         "details": details if details is not None else {},
-#         "profit_loss": profit_loss # Actual P/L if available
-#     }
-#     if self.debug:
-#         print(f"Reflect and Remember: {memory_entry}")
-#     # Potentially save to a log file or a more persistent memory store
-#     # For now, just printing if debug is enabled.
-#     # This could be expanded to interact with the agent's memory components.
-#     if not hasattr(self, 'trade_history'):
-#         self.trade_history = []
-#     self.trade_history.append(memory_entry)
-
 ```
