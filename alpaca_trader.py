@@ -5,15 +5,17 @@ from datetime import datetime
 import os
 
 # --- Alpaca API Configuration ---
-# Replace with your actual key and secret
-# It's strongly recommended to use environment variables for API keys
-API_KEY = os.getenv('ALPACA_API_KEY', 'YOUR_API_KEY_HERE')
-API_SECRET = os.getenv('ALPACA_API_SECRET', 'YOUR_API_SECRET_HERE')
+# --- Alpaca API Configuration ---
+# WARNING: API keys are hardcoded below as per user request.
+# This is NOT RECOMMENDED for security reasons. Prefer environment variables.
+API_KEY = 'PKHNQQLTBXQFBIRW8T95'
+API_SECRET = 'zPd6VAIzKhFFFVNyYFw79gSL4bnXerryeW4kfbMU'
 # Use paper trading URL for testing, live trading URL is 'https://api.alpaca.markets'
-BASE_URL = os.getenv('ALPACA_BASE_URL', 'https://paper-api.alpaca.markets')
+BASE_URL = 'https://paper-api.alpaca.markets' # Defaulting to paper trading
 
 # Connect to Alpaca
 try:
+    print(f"Attempting to connect to Alpaca with Key ID: {API_KEY[-4:]} at URL: {BASE_URL}")
     alpaca_api = tradeapi.REST(API_KEY, API_SECRET, base_url=BASE_URL)
     # Check if the API connection is successful
     account_info = alpaca_api.get_account()
@@ -23,10 +25,36 @@ except Exception as e:
     alpaca_api = None # Set to None if connection fails
 
 # --- TradingAgents Configuration ---
+# Default configuration uses OpenAI. Below shows how to configure for OpenRouter.
+USE_OPENROUTER = False # Set to True to use OpenRouter configuration example
+
 config = DEFAULT_CONFIG.copy()
 config["online_tools"] = True  # Ensure live data is used
-# It's assumed that API keys for other services (OpenAI, Finnhub) are set as environment variables
-# as per the original project's README.
+
+if USE_OPENROUTER:
+    print("Configuring TradingAgentsGraph for OpenRouter...")
+    # Ensure you have OPENROUTER_API_KEY set in your environment,
+    # or set OPENAI_API_KEY to your OpenRouter key (e.g., "sk-or-v1-...").
+    # The ChatOpenAI client might pick up OPENAI_API_KEY by default.
+    # Alternatively, you might need to pass the api_key directly to ChatOpenAI if using OpenRouter's specific key format
+    # and the library doesn't handle it automatically via OPENAI_API_KEY.
+    # Check Langchain documentation for ChatOpenAI with custom providers like OpenRouter.
+
+    config["llm_provider"] = "openrouter" # Ensure TradingAgentsGraph recognizes "openrouter"
+    config["deep_think_llm"] = "openrouter/anthropic/claude-3-opus"  # Example model
+    config["quick_think_llm"] = "openrouter/google/gemini-flash-1.5" # Example model
+    config["backend_url"] = "https://openrouter.ai/api/v1"
+    # Important: You'll also need to have the OPENROUTER_API_KEY environment variable set,
+    # or ensure OPENAI_API_KEY is set to your OpenRouter key, for the ChatOpenAI class to authenticate.
+    print(f"LLM Provider: {config['llm_provider']}")
+    print(f"Deep Think LLM: {config['deep_think_llm']}")
+    print(f"Quick Think LLM: {config['quick_think_llm']}")
+    print(f"Backend URL: {config['backend_url']}")
+else:
+    print("Using default LLM provider (ensure OPENAI_API_KEY and potentially FINNHUB_API_KEY are set).")
+    # Default config uses OpenAI, ensure OPENAI_API_KEY is set.
+    # Also, the TradingAgents framework uses Finnhub, so FINNHUB_API_KEY should be set.
+
 trading_agent = TradingAgentsGraph(debug=False, config=config)
 print("TradingAgentsGraph initialized.")
 
