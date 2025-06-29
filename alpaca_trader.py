@@ -5,9 +5,11 @@ from datetime import datetime
 import os
 
 #os api method for now only
-os.environ["OPENAI_API_KEY"] = "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"
+# IMPORTANT: This MUST be a real OpenAI API key for embeddings to work.
+os.environ["OPENAI_API_KEY"] = "YOUR_REAL_OPENAI_KEY_HERE"
 os.environ["FINNHUB_API_KEY"] = "d0u99jhr01qn5fk3v8rgd0u99jhr01qn5fk3v8s0" # <--- You can also add your Finnhub key here
-os.environ["OPENROUTER_API_KEY"] = "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"
+# This is for OpenRouter chat models.
+os.environ["OPENROUTER_API_KEY"] = "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"
 # --- Alpaca API Configuration ---
 # --- Alpaca API Configuration ---
 # WARNING: API keys are hardcoded below as per user request.
@@ -48,7 +50,7 @@ if USE_OPENROUTER:
 
     config["deep_think_llm"] = "deepseek/deepseek-chat-v3-0324:free"  # Example model
     config["quick_think_llm"] = "deepseek/deepseek-chat-v3-0324:free" # Example model
-    config["embedding_llm"] = "text-embedding-3-small" # <-- ADD THIS LINE or text-embedding-3-small
+    config["embedding_llm"] = "openai/text-embedding-3-small" # <-- UPDATED MODEL NAME
     config["backend_url"] = "https://openrouter.ai/api/v1"
     # Important: You'll also need to have the OPENROUTER_API_KEY environment variable set,
     # or ensure OPENAI_API_KEY is set to your OpenRouter key, for the ChatOpenAI class to authenticate.
