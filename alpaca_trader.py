@@ -4,6 +4,10 @@ from tradingagents.default_config import DEFAULT_CONFIG
 from datetime import datetime
 import os
 
+#os api method for now only
+os.environ["OPENAI_API_KEY"] = "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"
+os.environ["FINNHUB_API_KEY"] = "d0u99jhr01qn5fk3v8rgd0u99jhr01qn5fk3v8s0" # <--- You can also add your Finnhub key here
+os.environ["OPENROUTER_API_KEY"] = "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"
 # --- Alpaca API Configuration ---
 # --- Alpaca API Configuration ---
 # WARNING: API keys are hardcoded below as per user request.
@@ -26,7 +30,7 @@ except Exception as e:
 
 # --- TradingAgents Configuration ---
 # Default configuration uses OpenAI. Below shows how to configure for OpenRouter.
-USE_OPENROUTER = False # Set to True to use OpenRouter configuration example
+USE_OPENROUTER = True # Set to True to use OpenRouter configuration example
 
 config = DEFAULT_CONFIG.copy()
 config["online_tools"] = True  # Ensure live data is used
@@ -41,8 +45,10 @@ if USE_OPENROUTER:
     # Check Langchain documentation for ChatOpenAI with custom providers like OpenRouter.
 
     config["llm_provider"] = "openrouter" # Ensure TradingAgentsGraph recognizes "openrouter"
-    config["deep_think_llm"] = "openrouter/anthropic/claude-3-opus"  # Example model
-    config["quick_think_llm"] = "openrouter/google/gemini-flash-1.5" # Example model
+
+    config["deep_think_llm"] = "deepseek/deepseek-chat-v3-0324:free"  # Example model
+    config["quick_think_llm"] = "deepseek/deepseek-chat-v3-0324:free" # Example model
+    config["embedding_llm"] = "text-embedding-3-small" # <-- ADD THIS LINE or text-embedding-3-small
     config["backend_url"] = "https://openrouter.ai/api/v1"
     # Important: You'll also need to have the OPENROUTER_API_KEY environment variable set,
     # or ensure OPENAI_API_KEY is set to your OpenRouter key, for the ChatOpenAI class to authenticate.
@@ -64,9 +70,12 @@ def get_account_state(api, ticker):
         print("Alpaca API not initialized. Cannot get account state.")
         return 0.0, None
 
+
+    equity = 0.00
     try:
-        account_info = api.get_account()
-        equity = float(account_info.equity)
+        account = api.get_account()
+        # Use portfolio_value instead of equity
+        equity = float(account.portfolio_value)
     except Exception as e:
         print(f"Error fetching account information: {e}")
         equity = 0.0 # Default to 0 if account info cannot be fetched
@@ -226,7 +235,8 @@ if __name__ == "__main__":
     #          export ALPACA_API_SECRET='YOUR_SECRET'
     # You might also need to set OPENAI_API_KEY and FINNHUB_API_KEY for the TradingAgents framework.
 
-    ticker_to_trade = "SPY"  # Example: Trade SPDR S&P 500 ETF Trust
+
+    ticker_to_trade = "AAPL"  # Example: Trade SPDR S&P 500 ETF Trust
     # You can add more tickers to trade in a loop or manage a portfolio
     # For example:
     # portfolio_tickers = ["AAPL", "MSFT", "GOOGL"]
@@ -245,5 +255,3 @@ if __name__ == "__main__":
     print("\nScript execution finished.")
     print("Remember to manage your API keys securely and test thoroughly with a paper trading account first.")
     print("This script is for educational purposes and should be reviewed carefully before use with real funds.")
-
-```

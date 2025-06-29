@@ -117,13 +117,28 @@ pip install -r requirements.txt
 You will also need the FinnHub API for financial data. All of our code is implemented with the free tier.
 ```bash
 export FINNHUB_API_KEY=$YOUR_FINNHUB_API_KEY
+<<<<<<< HEAD
 ```
+=======
+#d0u99jhr01qn5fk3v8rgd0u99jhr01qn5fk3v8s0
+```
+#https://paper-api.alpaca.markets/v2
+#PKHNQQLTBXQFBIRW8T95
+#zPd6VAIzKhFFFVNyYFw79gSL4bnXerryeW4kfbMU
+>>>>>>> 2e1c03e (with keys updated!)
 
 You will need the OpenAI API for all the agents.
 ```bash
 export OPENAI_API_KEY=$YOUR_OPENAI_API_KEY
+<<<<<<< HEAD
 ```
 
+=======
+
+```
+#openrouter
+#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
+>>>>>>> 2e1c03e (with keys updated!)
 ### CLI Usage
 
 You can also try out the CLI directly by running:

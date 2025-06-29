@@ -48,6 +48,7 @@ class TradingAgentsGraph:
         self.debug = debug
         self.config = config or DEFAULT_CONFIG
 
+        
         # Update the interface's config
         set_config(self.config)
 
