@@ -5,8 +5,10 @@ from datetime import datetime
 import os
 
 #os api method for now only
-os.environ["OPENAI_API_KEY"] = "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"
+# IMPORTANT: This MUST be a real OpenAI API key for embeddings to work.
+os.environ["OPENAI_API_KEY"] = "YOUR_REAL_OPENAI_KEY_HERE"
 os.environ["FINNHUB_API_KEY"] = "d0u99jhr01qn5fk3v8rgd0u99jhr01qn5fk3v8s0" # <--- You can also add your Finnhub key here
+# This is for OpenRouter chat models.
 os.environ["OPENROUTER_API_KEY"] = "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"
 # --- Alpaca API Configuration ---
 # --- Alpaca API Configuration ---
