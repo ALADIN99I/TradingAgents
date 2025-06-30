@@ -6,10 +6,10 @@ import os
 
 #os api method for now only
 # IMPORTANT: This MUST be a real OpenAI API key for embeddings to work.
-os.environ["OPENAI_API_KEY"] = "YOUR_REAL_OPENAI_KEY_HERE"
+os.environ["OPENAI_API_KEY"] = "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"
 os.environ["FINNHUB_API_KEY"] = "d0u99jhr01qn5fk3v8rgd0u99jhr01qn5fk3v8s0" # <--- You can also add your Finnhub key here
 # This is for OpenRouter chat models.
-os.environ["OPENROUTER_API_KEY"] = "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"
+os.environ["OPENROUTER_API_KEY"] = "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"
 # --- Alpaca API Configuration ---
 # --- Alpaca API Configuration ---
 # WARNING: API keys are hardcoded below as per user request.
@@ -116,7 +116,8 @@ def execute_trade_logic(api, agent, ticker, decision, equity, position):
         # 1. Calculate Position Size
         investment_amount = equity * (risk_percent / 100)
         try:
-            last_price = api.get_latest_trade(ticker).price
+            # NEW, CORRECTED CODE
+            last_price = api.get_latest_quote(ticker).ap
         except Exception as e:
             print(f"Error fetching latest price for {ticker}: {e}. Cannot calculate position size.")
             return
@@ -238,7 +239,7 @@ if __name__ == "__main__":
     # You might also need to set OPENAI_API_KEY and FINNHUB_API_KEY for the TradingAgents framework.
 
 
-    ticker_to_trade = "AAPL"  # Example: Trade SPDR S&P 500 ETF Trust
+    ticker_to_trade = "GOOGL"  # Example: Trade SPDR S&P 500 ETF Trust
     # You can add more tickers to trade in a loop or manage a portfolio
     # For example:
     # portfolio_tickers = ["AAPL", "MSFT", "GOOGL"]

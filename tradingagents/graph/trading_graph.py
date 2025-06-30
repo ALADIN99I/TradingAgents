@@ -59,9 +59,25 @@ class TradingAgentsGraph:
         )
 
         # Initialize LLMs
-        if self.config["llm_provider"].lower() == "openai" or self.config["llm_provider"] == "ollama" or self.config["llm_provider"] == "openrouter":
-            self.deep_thinking_llm = ChatOpenAI(model=self.config["deep_think_llm"], base_url=self.config["backend_url"])
-            self.quick_thinking_llm = ChatOpenAI(model=self.config["quick_think_llm"], base_url=self.config["backend_url"])
+        # around line 71 - REPLACEMENT CODE 
+        """ it was # Around line 71
+if self.config["llm_provider"].lower() == "openai" or self.config["llm_provider"] == "ollama" or self.config["llm_provider"] == "openrouter":
+    self.deep_thinking_llm = ChatOpenAI(model=self.config["deep_think_llm"], base_url=self.config["backend_url"])
+    self.quick_thinking_llm = ChatOpenAI(model=self.config["quick_think_llm"], base_url=self.config["backend_url"])"""
+        
+        
+        if self.config["llm_provider"].lower() in ["openai", "ollama", "openrouter"]:
+            # Create a dictionary for the arguments
+            llm_args = {
+                "base_url": self.config["backend_url"],
+            }
+            # If the provider is OpenRouter, add the specific API key
+            if self.config["llm_provider"].lower() == "openrouter":
+                llm_args["api_key"] = os.environ.get("OPENROUTER_API_KEY")
+
+            # Initialize the LLMs with the correct arguments
+            self.deep_thinking_llm = ChatOpenAI(model=self.config["deep_think_llm"], **llm_args)
+            self.quick_thinking_llm = ChatOpenAI(model=self.config["quick_think_llm"], **llm_args)
         elif self.config["llm_provider"].lower() == "anthropic":
             self.deep_thinking_llm = ChatAnthropic(model=self.config["deep_think_llm"], base_url=self.config["backend_url"])
             self.quick_thinking_llm = ChatAnthropic(model=self.config["quick_think_llm"], base_url=self.config["backend_url"])
