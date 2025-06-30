@@ -6,10 +6,10 @@ import os
 
 #os api method for now only
 # IMPORTANT: This MUST be a real OpenAI API key for embeddings to work.
-os.environ["OPENAI_API_KEY"] = "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"
+os.environ["OPENAI_API_KEY"] = ""
 os.environ["FINNHUB_API_KEY"] = "d0u99jhr01qn5fk3v8rgd0u99jhr01qn5fk3v8s0" # <--- You can also add your Finnhub key here
 # This is for OpenRouter chat models.
-os.environ["OPENROUTER_API_KEY"] = "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"
+os.environ["OPENROUTER_API_KEY"] = ""
 # --- Alpaca API Configuration ---
 # --- Alpaca API Configuration ---
 # WARNING: API keys are hardcoded below as per user request.
