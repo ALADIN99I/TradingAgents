@@ -126,7 +126,7 @@ def execute_trade_logic(api, agent, ticker, decision, equity, position): #PARAME
         if decision == "BUY":
             log.info(f"Action: Attempting to BUY {ticker}")
             try:
-                last_price = api.get_last_quote(ticker).askprice #get_last_quote not get_latest_quote
+                last_price = api.get_latest_quote(ticker).askprice #get_last_quote not get_latest_quote
                 qty = calculate_position_size(equity, last_price)
                 log.info(f"Calculated position size: {qty} shares of {ticker}")
                 if qty > 0:
@@ -146,7 +146,7 @@ def execute_trade_logic(api, agent, ticker, decision, equity, position): #PARAME
         elif decision == "SELL":
             log.info(f"Action: Attempting to SELL (short) {ticker}")
             try:
-                last_price = api.get_last_quote(ticker).askprice #get_last_quote not get_latest_quote
+                last_price = api.get_latest_quote(ticker).askprice #get_last_quote not get_latest_quote
                 qty = calculate_position_size(equity, last_price)
                 log.info(f"Calculated position size: {qty} shares of {ticker}")
                 if qty > 0:
