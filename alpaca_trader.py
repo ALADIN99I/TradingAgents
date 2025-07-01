@@ -128,7 +128,8 @@ def execute_trade_logic(api, data_api, agent, ticker, decision, conviction_score
     import logging
     log = logging.getLogger(__name__) #log definition
 
-    log.info(f"Executing trade logic for {ticker}. Decision: {decision}. Equity: {equity:.2f}. Position: {position}")
+    action_type = "Managing existing" if position else "Opening new"
+    log.info(f"Executing trade logic for {ticker}. Action Type: {action_type}. Decision: {decision}. Conviction: {conviction_score:.2f}. Equity: {equity:.2f}. Position: {position is not None}")
     try:
         # Get the most recent 1-minute bar for the stock using the new data_api client
         request_params = StockBarsRequest(
@@ -241,59 +242,144 @@ def run_trading_cycle(ticker_to_potentially_trade): # RENAMED and parameter clar
         print("--- Trading cycle complete ---")
         return
 
-    # 2. Review Existing Open Positions
-    print("\n--- Reviewing Open Positions ---")
+    # 2. Gather Detailed Data for Existing Open Positions
+    print("\n--- Gathering Details for Open Positions ---")
+    detailed_open_positions = []
     if not open_positions:
-        print("No open positions to review.")
+        print("No open positions.")
     else:
         for position in open_positions:
-            print(f"Reviewing open position in {position.symbol}: {position.qty} shares @ avg entry ${position.avg_entry_price}")
-            # TODO: Placeholder for consulting TradingAgentsGraph for management decisions
-            # e.g., get_management_decision(position.symbol, position, current_equity)
-            # This would involve a new way to interact with trading_agent.propagate or a new method.
-            # For now, we just log. In a real scenario, might adjust stops, take profit, or close.
-            pass # Explicitly doing nothing for now beyond logging
+            try:
+                request_params = StockBarsRequest(
+                                    symbol_or_symbols=[position.symbol],
+                                    timeframe=TimeFrame.Minute,
+                                    limit=1
+                                 )
+                barset = data_client.get_stock_bars(request_params)
+                current_price = float(position.current_price) # Fallback
+                if barset and barset[position.symbol]:
+                    current_price = barset[position.symbol][0].close
+                else:
+                    print(f"Warning: Could not fetch latest bar for {position.symbol}. Using position.current_price.")
 
-    # 3. Consider New Trades for `ticker_to_potentially_trade`
-    # This logic assumes `ticker_to_potentially_trade` is a specific ticker we're always watching for new entries.
-    print(f"\n--- Considering New Trade for {ticker_to_potentially_trade} ---")
-    analysis_date_str = datetime.now().strftime("%Y-%m-%d")
+                position_details = {
+                    "symbol": position.symbol, "qty": float(position.qty),
+                    "avg_entry_price": float(position.avg_entry_price), "market_price": current_price,
+                    "unrealized_pl": float(position.unrealized_pl),
+                    "unrealized_pl_pct": float(position.unrealized_plpc) * 100,
+                }
+                detailed_open_positions.append(position_details)
+                print(f"  {position.symbol}: Qty {position_details['qty']}, Entry ${position_details['avg_entry_price']:.2f}, "
+                      f"Mkt ${position_details['market_price']:.2f}, UPL ${position_details['unrealized_pl']:.2f} ({position_details['unrealized_pl_pct']:.2f}%)")
+            except Exception as e:
+                print(f"Error processing position {position.symbol} for detailed view: {e}")
+                # Fallback to basic info if API call fails
+                detailed_open_positions.append({"symbol": position.symbol, "qty": float(position.qty), "avg_entry_price": float(position.avg_entry_price), "market_price": float(position.current_price), "unrealized_pl": float(position.unrealized_pl), "unrealized_pl_pct": float(position.unrealized_plpc) * 100})
 
-    # Check if we already have a position in ticker_to_potentially_trade
-    is_already_open = any(p.symbol == ticker_to_potentially_trade for p in open_positions)
-    position_details_for_new_trade = next((p for p in open_positions if p.symbol == ticker_to_potentially_trade), None)
+    # 3. Get Mocked Agent Portfolio Advice
+    # In a real system, trading_agent.propagate (or a new method) would be called here with detailed_open_positions.
+    print("\n--- Getting (Mocked) Agent Portfolio Advice ---")
+    agent_advice = get_mocked_agent_portfolio_advice(detailed_open_positions, ticker_to_potentially_trade)
 
-    if is_already_open:
-        print(f"Already have an open position in {ticker_to_potentially_trade}. Skipping new trade consideration for it in this cycle.")
-        # In a more advanced system, even if open, the agent might decide to ADD to the position.
-        # For now, new trade logic is only for tickers not currently held or if specifically allowed.
+    # 4. Process Management Actions for Open Positions (Logging only for now)
+    print("\n--- Processing (Mocked) Management Actions ---")
+    if agent_advice.get("position_management"):
+        for advice in agent_advice["position_management"]:
+            print(f"Agent advises: Symbol: {advice['symbol']}, Action: {advice['action']}, "
+                  f"Details: {advice.get('quantity', 'N/A')}, Reason: {advice.get('reason', 'N/A')}")
+            # TODO: Future: Call execute_trade_logic here with new parameters/logic to handle these actions.
+            # Example: if advice['action'] == 'REDUCE':
+            # execute_trade_logic_for_management(api, data_api, advice['symbol'], 'sell', advice['quantity'], current_equity, find_position_obj(open_positions, advice['symbol']))
+            # Note: execute_trade_logic would need significant changes to handle partial sales, adds, etc.
     else:
-        print(f"Requesting NEW trade decision for {ticker_to_potentially_trade} for date: {analysis_date_str}...")
-        try:
-            raw_output = trading_agent.propagate(ticker_to_potentially_trade, analysis_date_str)
-            if isinstance(raw_output, tuple) and len(raw_output) == 2 and isinstance(raw_output[1], tuple) and len(raw_output[1]) == 2):
-                _, (agent_decision, conviction_score) = raw_output
-            elif isinstance(raw_output, tuple) and len(raw_output) == 2:
-                 agent_decision, conviction_score = raw_output
-            else:
-                print(f"Warning: Unexpected output structure from trading_agent.propagate(): {raw_output}. Defaulting conviction.")
-                agent_decision = raw_output[1] if isinstance(raw_output, tuple) and len(raw_output) > 1 else "HOLD"
-                conviction_score = 0.0
-                if agent_decision in ["BUY", "SELL"]: conviction_score = 0.8
+        print("No management actions advised for open positions.")
 
-            print(f"Agent Decision for NEW trade on {ticker_to_potentially_trade}: {agent_decision} with Conviction: {conviction_score:.2f}")
+    # 5. Process New Trade Opportunity (if any)
+    print(f"\n--- Considering (Mocked) New Trade Opportunity ---")
+    new_trade_opportunity = agent_advice.get("new_trade_opportunity")
+    if new_trade_opportunity:
+        nt_symbol = new_trade_opportunity['symbol']
+        nt_decision = new_trade_opportunity['decision']
+        nt_conviction = new_trade_opportunity['conviction_score']
+        nt_reason = new_trade_opportunity.get('reason', 'N/A')
 
-            if agent_decision in ["BUY", "SELL"]:
-                # Pass None for position if opening a new one, or existing if somehow logic allows adding.
-                execute_trade_logic(alpaca_api, data_client, trading_agent, ticker_to_potentially_trade, agent_decision, conviction_score, current_equity, position_details_for_new_trade)
-            else:
-                print(f"Decision for {ticker_to_potentially_trade} is {agent_decision}. No new trade action taken.")
+        print(f"Agent suggests NEW trade: {nt_decision} {nt_symbol} with Conviction {nt_conviction:.2f}. Reason: {nt_reason}")
 
-        except Exception as e:
-            print(f"Error getting NEW trade decision from TradingAgentsGraph for {ticker_to_potentially_trade}: {e}")
-            # Not executing trade if decision fetching failed
+        is_already_open = any(p['symbol'] == nt_symbol for p in detailed_open_positions)
+        current_pos_for_new_trade_obj = next((p_obj for p_obj in open_positions if p_obj.symbol == nt_symbol), None)
+
+
+        if is_already_open:
+            print(f"Already have an open position in {nt_symbol}. Agent might be advising to ADD or this is a conflicting signal.")
+            # TODO: Future: If agent explicitly says "ADD", then execute_trade_logic should handle adding to position.
+            # For now, we are cautious and don't open a new overlapping trade from this "new_trade_opportunity" path
+            # if the "position_management" path didn't already handle an "ADD".
+        elif nt_decision in ["BUY", "SELL"]:
+            print(f"Executing new {nt_decision} trade for {nt_symbol}.")
+            execute_trade_logic(alpaca_api, data_client, trading_agent, nt_symbol, nt_decision, nt_conviction, current_equity, None) # Pass None as position for new trade
+        else:
+            print(f"Decision for new opportunity on {nt_symbol} is {nt_decision}. No new trade action taken.")
+    else:
+        print("No new high-conviction trade opportunities advised by agent in this cycle.")
 
     print(f"\n--- Trading cycle complete for {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---")
+
+# --- Mock Agent Response Function ---
+def get_mocked_agent_portfolio_advice(detailed_open_positions, potential_new_trade_ticker):
+    """
+    Mocks the response from TradingAgentsGraph for portfolio management advice.
+    In a real system, this would involve a call to trading_agent.propagate() or a similar method
+    with detailed_open_positions and potentially potential_new_trade_ticker.
+    """
+    print(f"DEBUG: Mocking agent advice for {len(detailed_open_positions)} open positions and new look at {potential_new_trade_ticker}.")
+    management_actions = []
+    new_trade_decision = None
+
+    # Example logic for managing open positions (mocked)
+    for pos in detailed_open_positions:
+        # Simple mock: if P/L > 5%, suggest REDUCE, if P/L < -2%, suggest CLOSE, else HOLD
+        if pos['unrealized_pl_pct'] > 5.0:
+            management_actions.append({
+                'symbol': pos['symbol'],
+                'action': 'REDUCE',
+                'quantity': int(pos['qty'] * 0.1), # Suggest selling 10%
+                'reason': f"Mock: Profitable ({pos['unrealized_pl_pct']:.2f}%), suggesting partial profit taking."
+            })
+        elif pos['unrealized_pl_pct'] < -2.0:
+            management_actions.append({
+                'symbol': pos['symbol'],
+                'action': 'CLOSE',
+                'reason': f"Mock: Losing ({pos['unrealized_pl_pct']:.2f}%), suggesting cut loss."
+            })
+        else:
+            management_actions.append({
+                'symbol': pos['symbol'],
+                'action': 'HOLD',
+                'reason': f"Mock: Holding position ({pos['unrealized_pl_pct']:.2f}%)."
+            })
+
+    # Example logic for new trade opportunity (mocked)
+    # Let's say we only suggest a new trade if there are few open positions or on a specific ticker
+    if len(detailed_open_positions) < 3 and potential_new_trade_ticker == "GOOGL": # Arbitrary condition
+        new_trade_decision = {
+            'symbol': potential_new_trade_ticker,
+            'decision': 'BUY', # Could be BUY or SELL
+            'conviction_score': 0.75, # Example conviction
+            'reason': f'Mock: Favorable conditions for {potential_new_trade_ticker} and portfolio has capacity.'
+        }
+    elif potential_new_trade_ticker == "MSFT": # Another arbitrary condition for variety
+         new_trade_decision = {
+            'symbol': potential_new_trade_ticker,
+            'decision': 'SELL', # Example short sell
+            'conviction_score': 0.65,
+            'reason': f'Mock: Bearish signal on {potential_new_trade_ticker}.'
+        }
+
+
+    return {
+        "position_management": management_actions,
+        "new_trade_opportunity": new_trade_decision
+    }
 
 
 if __name__ == "__main__":
