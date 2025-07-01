@@ -10,10 +10,11 @@ from alpaca.data.timeframe import TimeFrame
 
 #os api method for now only
 # IMPORTANT: This MUST be a real OpenAI API key for embeddings to work.
-os.environ["OPENAI_API_KEY"] =
+os.environ["OPENAI_API_KEY"] = "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"
 os.environ["FINNHUB_API_KEY"] = "d0u99jhr01qn5fk3v8rgd0u99jhr01qn5fk3v8s0" # <--- You can also add your Finnhub key here
 # This is for OpenRouter chat models.
-os.environ["OPENROUTER_API_KEY"] =
+os.environ["OPENROUTER_API_KEY"] = "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"
+#
 # --- Alpaca API Configuration ---
 # --- Alpaca API Configuration ---
 # WARNING: API keys are hardcoded below as per user request.
@@ -450,7 +451,7 @@ def run_trading_cycle(ticker_to_potentially_trade): # RENAMED and parameter clar
         print("No management actions advised for open positions.")
 
     # 5. Process New Trade Opportunity (if any)
-    print(f"\n--- Considering (Mocked) New Trade Opportunity ---")
+    print(f"\n--- Considering New Trade Opportunity ---")
     new_trade_opportunity = agent_advice.get("new_trade_opportunity")
     if new_trade_opportunity:
         nt_symbol = new_trade_opportunity['symbol']
@@ -461,21 +462,31 @@ def run_trading_cycle(ticker_to_potentially_trade): # RENAMED and parameter clar
         print(f"Agent suggests NEW trade: {nt_decision} {nt_symbol} with Conviction {nt_conviction:.2f}. Reason: {nt_reason}")
 
         is_already_open = any(p['symbol'] == nt_symbol for p in detailed_open_positions)
-        current_pos_for_new_trade_obj = next((p_obj for p_obj in open_positions if p_obj.symbol == nt_symbol), None)
+        # current_pos_for_new_trade_obj = next((p_obj for p_obj in open_positions if p_obj.symbol == nt_symbol), None) # Not strictly needed with new logic
 
-
-        if is_already_open:
-            print(f"Already have an open position in {nt_symbol}. Agent might be advising to ADD or this is a conflicting signal.")
-            # TODO: Future: If agent explicitly says "ADD", then execute_trade_logic should handle adding to position.
-            # For now, we are cautious and don't open a new overlapping trade from this "new_trade_opportunity" path
-            # if the "position_management" path didn't already handle an "ADD".
-        elif nt_decision in ["BUY", "SELL"]:
-            print(f"Executing new {nt_decision} trade for {nt_symbol}.")
-            execute_trade_logic(alpaca_api, data_client, trading_agent, nt_symbol, nt_decision, nt_conviction, current_equity, None) # Pass None as position for new trade
+        if nt_decision == "BUY" and nt_conviction > 0.5:
+            if is_already_open:
+                # This is now handled by the management advice, so we can ignore the new trade signal
+                print(f"Agent advised a new BUY for {nt_symbol}, but a position is already open. Management advice should be used for ADD actions.")
+            else:
+                # Execute the new trade
+                print(f"Agent suggests NEW trade: {nt_decision} {nt_symbol} with Conviction {nt_conviction:.2f}. Reason: {nt_reason}")
+                print(f"Executing new {nt_decision} trade for {nt_symbol}.")
+                execute_trade_logic(alpaca_api, data_client, trading_agent, nt_symbol, nt_decision, nt_conviction, current_equity, None) # Pass None as position for new trade
+        elif nt_decision == "SELL" and nt_conviction > 0.5: # Assuming SELL here implies opening a new short position
+            if is_already_open:
+                # This logic might need refinement if shorting an already owned (long) asset is a strategy.
+                # For now, similar to BUY, if a position exists, management advice should handle it (e.g. CLOSE then SHORT).
+                print(f"Agent advised a new SELL (short) for {nt_symbol}, but a position is already open. Management advice should handle this.")
+            else:
+                print(f"Agent suggests NEW trade: {nt_decision} {nt_symbol} with Conviction {nt_conviction:.2f}. Reason: {nt_reason}")
+                print(f"Executing new {nt_decision} (short) trade for {nt_symbol}.")
+                execute_trade_logic(alpaca_api, data_client, trading_agent, nt_symbol, nt_decision, nt_conviction, current_equity, None) # Pass None for new short
         else:
-            print(f"Decision for new opportunity on {nt_symbol} is {nt_decision}. No new trade action taken.")
+            # Agent advised not to open a new position (e.g. HOLD or low conviction)
+            print(f"Agent advises no new high-conviction trade for {ticker_to_potentially_trade} (Decision: {nt_decision}, Conviction: {nt_conviction:.2f}).")
     else:
-        print("No new high-conviction trade opportunities advised by agent in this cycle.")
+        print(f"Agent advises no new high-conviction trade opportunities for {ticker_to_potentially_trade} in this cycle.")
 
     print(f"\n--- Trading cycle complete for {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---")
 
@@ -500,12 +511,12 @@ if __name__ == "__main__":
         print("Using placeholders will likely result in authentication errors with the Alpaca API.")
 
     if alpaca_api is not None and data_client is not None: # Only run if API connection was successful
-        print("\n--- Running Simulated Buy Logic Test ---")
-        test_equity = 50000 # Example equity, adjust as needed
-        test_conviction = 0.85 # Example: High conviction for testing
-        # Pass the data_client and conviction_score to the simulation function
-        test_buy_logic_simulation(data_client, ticker_to_trade, test_equity, test_conviction)
-        print("--- Simulated Buy Logic Test Complete ---\n")
+        # print("\n--- Running Simulated Buy Logic Test ---")
+        # test_equity = 50000 # Example equity, adjust as needed
+        # test_conviction = 0.85 # Example: High conviction for testing
+        # # Pass the data_client and conviction_score to the simulation function
+        # test_buy_logic_simulation(data_client, ticker_to_trade, test_equity, test_conviction)
+        # print("--- Simulated Buy Logic Test Complete ---\n")
 
         # When you run the actual session, you'll need to pass both clients
         # Continuous trading loop
