@@ -122,71 +122,135 @@ def calculate_position_size(equity, last_price, conviction_score):
     position_size = dollars_to_risk / last_price
     return int(position_size)
 
-def execute_trade_logic(api, data_api, agent, ticker, decision, conviction_score, equity, position): # PARAMETER CHANGE
-    """Contains the logic to BUY, SELL, or HOLD."""
+def execute_trade_logic(api, data_api, agent, ticker, decision, conviction_score, equity, position, management_action=None, quantity_for_action=None): # PARAMETER CHANGE
+    """
+    Handles trade execution for opening new positions or managing existing ones.
+    - For new trades: uses `decision` ("BUY"/"SELL") and `conviction_score`.
+    - For managing existing positions: uses `management_action` ("CLOSE"/"REDUCE"/"ADD") and `quantity_for_action`.
+    """
     #log import
     import logging
     log = logging.getLogger(__name__) #log definition
 
-    action_type = "Managing existing" if position else "Opening new"
-    log.info(f"Executing trade logic for {ticker}. Action Type: {action_type}. Decision: {decision}. Conviction: {conviction_score:.2f}. Equity: {equity:.2f}. Position: {position is not None}")
+    # Parameters:
+    # decision: "BUY", "SELL" (primarily for new trades)
+    # conviction_score: float (for new trades, or if agent provides it for adjustments)
+    # equity: float
+    # position: Alpaca position object (if managing an existing one), else None
+    # management_action: "CLOSE", "REDUCE", "ADD", "NONE" (or None) - specific for managing existing positions
+    # quantity_for_action: int/float (for REDUCE/ADD actions on existing positions)
+
+    log_message_parts = [f"Executing trade logic for {ticker}"]
+    if management_action and management_action != "NONE":
+        log_message_parts.append(f"Management Action: {management_action}")
+        if quantity_for_action:
+            log_message_parts.append(f"Quantity: {quantity_for_action}")
+    else:
+        log_message_parts.append(f"Decision for New Trade: {decision}")
+        log_message_parts.append(f"Conviction: {conviction_score:.2f}")
+
+    log_message_parts.append(f"Equity: {equity:.2f}")
+    log_message_parts.append(f"Existing Position: {position is not None}")
+    log.info(". ".join(log_message_parts))
+
     try:
-        # Get the most recent 1-minute bar for the stock using the new data_api client
-        request_params = StockBarsRequest(
-                            symbol_or_symbols=[ticker],
-                            timeframe=TimeFrame.Minute,
-                            limit=1
-                         )
-        barset = data_api.get_stock_bars(request_params)
+        # Price fetching is needed for new trades or if logic requires current price for management decisions
+        # For simple CLOSE/REDUCE by quantity, last_price might not be strictly needed for the order itself,
+        # but calculate_position_size (for new trades) does.
+        last_price = None
+        # Fetch price if needed for new trades or ADD operations.
+        # Also ensure data_api is valid.
+        if (not management_action or management_action in ["NONE", "ADD"]) and data_api:
+            request_params = StockBarsRequest(
+                                symbol_or_symbols=[ticker],
+                                timeframe=TimeFrame.Minute,
+                                limit=1)
+            barset = data_api.get_stock_bars(request_params)
+            if barset and barset[ticker]:
+                last_price = barset[ticker][0].close
+            else:
+                log.error(f"Could not get last price for {ticker}. Cannot execute new BUY/SELL or ADD action.")
+                return
+        elif (not management_action or management_action in ["NONE", "ADD"]) and not data_api:
+             log.error(f"data_api not available for price fetching in execute_trade_logic for {ticker}. Cannot proceed.")
+             return
 
-        if barset and barset[ticker]:
-            last_price = barset[ticker][0].close  # Use .close instead of .c
-        else:
-            log.error(f"Could not get last price for {ticker}. No bar data found.")
-            return # Exit if we can't get the price
+        # ---- Management Actions on Existing Positions ----
+        if management_action and management_action != "NONE":
+            if not position:
+                log.warning(f"Management action '{management_action}' requested for {ticker}, but no existing position found. Ignoring.")
+                return
 
-        if position is not None:
-            # We have a position, so we can either hold or sell to close
-            if decision == "SELL":
-                log.info(f"Action: Closing position of {position.qty} shares of {ticker}")
-                api.close_position(ticker)
-            else:  # "BUY" or "HOLD"
-                log.info(f"Action: Holding position in {ticker}")
-        else:
-            # No position, so we can either open a new position or do nothing
+            if management_action == "HOLD":
+                log.info(f"Management Action: HOLD for {ticker}. No changes made.")
+            elif management_action == "CLOSE":
+                log.info(f"Management Action: CLOSE for {ticker}. Attempting to close position.")
+                try:
+                    closed_order = api.close_position(ticker)
+                    log.info(f"Submitted order to CLOSE position in {ticker}. Order ID: {closed_order.id}")
+                except Exception as e:
+                    log.error(f"Error trying to CLOSE position in {ticker}: {e}")
+            elif management_action == "REDUCE":
+                if quantity_for_action and quantity_for_action > 0:
+                    current_qty = float(position.qty)
+                    if quantity_for_action >= current_qty:
+                        log.info(f"Management Action: REDUCE quantity {quantity_for_action} for {ticker} is >= current quantity {current_qty}. Changing to CLOSE.")
+                        try:
+                            closed_order = api.close_position(ticker)
+                            log.info(f"Submitted order to CLOSE (due to REDUCE full amount) position in {ticker}. Order ID: {closed_order.id}")
+                        except Exception as e:
+                            log.error(f"Error trying to CLOSE (due to REDUCE full amount) position in {ticker}: {e}")
+                    else:
+                        log.info(f"Management Action: REDUCE for {ticker}. Attempting to sell {quantity_for_action} shares.")
+                        try:
+                            reduce_order = api.submit_order(
+                                symbol=ticker,
+                                qty=quantity_for_action,
+                                side='sell',
+                                type='market',
+                                time_in_force='day'
+                            )
+                            log.info(f"Submitted order to REDUCE position in {ticker} by {quantity_for_action} shares. Order ID: {reduce_order.id}")
+                        except Exception as e:
+                            log.error(f"Error trying to REDUCE position in {ticker} by {quantity_for_action} shares: {e}")
+                else:
+                    log.warning(f"Management Action: REDUCE for {ticker} but quantity_for_action is invalid ({quantity_for_action}). No action taken.")
+            # "ADD" will be implemented later.
+            else:
+                log.info(f"Management Action: {management_action} for {ticker} - (Execution logic pending for this action type).")
+
+        # ---- Opening New Positions ----
+        # (Only if no specific management_action is given, or it's "NONE", and no existing position)
+        elif (not management_action or management_action == "NONE") and position is None:
             if decision == "BUY":
-                log.info(f"Action: Attempting to BUY {ticker} with conviction {conviction_score}")
+                if last_price is None: log.error(f"Cannot BUY {ticker} (new), last_price not fetched."); return
+                log.info(f"Attempting to BUY new position in {ticker} with conviction {conviction_score}")
                 qty = calculate_position_size(equity, last_price, conviction_score)
-                log.info(f"Calculated position size: {qty} shares of {ticker} based on conviction {conviction_score}")
+                log.info(f"Calculated position size for new BUY: {qty} shares of {ticker}")
                 if qty > 0:
-                    api.submit_order(
-                        symbol=ticker,
-                        qty=qty,
-                        side='buy',
-                        type='market',
-                        time_in_force='day'
-                    )
-                    log.info(f"Market buy order for {qty} shares of {ticker} placed.")
+                    api.submit_order(symbol=ticker, qty=qty, side='buy', type='market', time_in_force='day')
+                    log.info(f"Market BUY order for {qty} shares of {ticker} placed.")
                 else:
-                    log.info(f"Position size is 0 for {ticker}. No trade executed.")
+                    log.info(f"Position size is 0 for new BUY on {ticker}. No trade.")
+            elif decision == "SELL": # For short selling a new position
+                if last_price is None: log.error(f"Cannot SELL {ticker} (new short), last_price not fetched."); return
+                log.info(f"Attempting to SELL (short) new position in {ticker} with conviction {conviction_score}")
+                qty = calculate_position_size(equity, last_price, conviction_score)
+                log.info(f"Calculated position size for new SELL (short): {qty} shares of {ticker}")
+                if qty > 0:
+                    api.submit_order(symbol=ticker, qty=qty, side='sell', type='market', time_in_force='day')
+                    log.info(f"Market SELL (short) order for {qty} shares of {ticker} placed.")
+                else:
+                    log.info(f"Position size is 0 for new SELL (short) on {ticker}. No trade.")
+            elif decision == "HOLD":
+                log.info(f"Decision is HOLD for new trade on {ticker}. No action taken.")
+            else: # Should not happen if decision is always BUY/SELL/HOLD
+                log.warning(f"Unknown decision '{decision}' for new trade on {ticker}.")
 
-            elif decision == "SELL":
-                log.info(f"Action: Attempting to SELL (short) {ticker} with conviction {conviction_score}")
-                qty = calculate_position_size(equity, last_price, conviction_score)
-                log.info(f"Calculated position size: {qty} shares of {ticker} based on conviction {conviction_score}")
-                if qty > 0:
-                    api.submit_order(
-                        symbol=ticker,
-                        qty=qty,
-                        side='sell',
-                        type='market',
-                        time_in_force='day'
-                    )
-                    log.info(f"Market sell (short) order for {qty} shares of {ticker} placed.")
-                else:
-                    log.info(f"Position size is 0 for {ticker}. No trade executed.")
-            else:  # decision == "HOLD"
-                log.info(f"Action: HOLD for {ticker}. No trade executed. (Decision: {decision}, Position: {position})")
+        # ---- Fallback/Default Behavior for Existing Positions if no specific management_action ----
+        elif position is not None and (not management_action or management_action == "NONE"):
+            log.info(f"No specific management action for existing position in {ticker}. Decision was '{decision}'. Defaulting to HOLD.")
+            # Previously, a 'SELL' decision here would close. Now, explicit 'CLOSE' management_action is preferred.
 
     except Exception as e:
         log.error(f"Error in trade logic for {ticker}: {e}")
@@ -285,12 +349,53 @@ def run_trading_cycle(ticker_to_potentially_trade): # RENAMED and parameter clar
     print("\n--- Processing (Mocked) Management Actions ---")
     if agent_advice.get("position_management"):
         for advice in agent_advice["position_management"]:
-            print(f"Agent advises: Symbol: {advice['symbol']}, Action: {advice['action']}, "
-                  f"Details: {advice.get('quantity', 'N/A')}, Reason: {advice.get('reason', 'N/A')}")
-            # TODO: Future: Call execute_trade_logic here with new parameters/logic to handle these actions.
-            # Example: if advice['action'] == 'REDUCE':
-            # execute_trade_logic_for_management(api, data_api, advice['symbol'], 'sell', advice['quantity'], current_equity, find_position_obj(open_positions, advice['symbol']))
-            # Note: execute_trade_logic would need significant changes to handle partial sales, adds, etc.
+            log_msg_parts = [
+                f"Agent advises for {advice['symbol']}: Action: {advice['action']}"
+            ]
+            if 'quantity' in advice:
+                log_msg_parts.append(f"Quantity: {advice['quantity']}")
+            if 'reason' in advice:
+                log_msg_parts.append(f"Reason: {advice['reason']}")
+            print(". ".join(log_msg_parts))
+
+            advised_action = advice['action'].upper() # Normalize to uppercase
+            advised_symbol = advice['symbol']
+
+            # Find the corresponding detailed position object and original Alpaca position object
+            current_detailed_position = next((p for p in detailed_open_positions if p['symbol'] == advised_symbol), None)
+            current_alpaca_position_obj = next((p_obj for p_obj in open_positions if p_obj.symbol == advised_symbol), None)
+
+            if not current_alpaca_position_obj:
+                print(f"Warning: Agent advised action for {advised_symbol}, but no open position object found. Skipping.")
+                continue
+
+            if advised_action in ["CLOSE", "REDUCE"]:
+                quantity_for_action = advice.get('quantity') if advised_action == "REDUCE" else None
+                if advised_action == "REDUCE" and (not isinstance(quantity_for_action, (int, float)) or quantity_for_action <= 0):
+                    print(f"Warning: Invalid or missing quantity for REDUCE action on {advised_symbol}. Skipping.")
+                    continue
+
+                # For management actions, 'decision' and 'conviction_score' are less relevant unless agent provides new ones for adjustment.
+                # Passing None or default values for them.
+                execute_trade_logic(
+                    api=alpaca_api,
+                    data_api=data_client,
+                    agent=trading_agent, # `agent` object might be used by execute_trade_logic if it evolves
+                    ticker=advised_symbol,
+                    decision=None, # Not a new trade decision
+                    conviction_score=0, # Not directly applicable for pre-decided management action qty
+                    equity=current_equity,
+                    position=current_alpaca_position_obj, # Crucial: pass the existing position object
+                    management_action=advised_action,
+                    quantity_for_action=quantity_for_action
+                )
+            elif advised_action == "ADD":
+                # TODO: Implement ADD logic call to execute_trade_logic
+                print(f"Action ADD for {advised_symbol} - (Execution logic pending in run_trading_cycle).")
+            elif advised_action == "HOLD":
+                print(f"Agent advises HOLD for {advised_symbol}. No execution needed.")
+            else:
+                print(f"Unknown management action '{advised_action}' for {advised_symbol}. Skipping.")
     else:
         print("No management actions advised for open positions.")
 
