@@ -359,13 +359,30 @@ def run_trading_cycle(ticker_to_potentially_trade): # RENAMED and parameter clar
                 # Fallback to basic info if API call fails
                 detailed_open_positions.append({"symbol": position.symbol, "qty": float(position.qty), "avg_entry_price": float(position.avg_entry_price), "market_price": float(position.current_price), "unrealized_pl": float(position.unrealized_pl), "unrealized_pl_pct": float(position.unrealized_plpc) * 100})
 
-    # 3. Get Mocked Agent Portfolio Advice
-    # In a real system, trading_agent.propagate (or a new method) would be called here with detailed_open_positions.
-    print("\n--- Getting (Mocked) Agent Portfolio Advice ---")
-    agent_advice = get_mocked_agent_portfolio_advice(detailed_open_positions, ticker_to_potentially_trade)
+    # 3. Get Live Agent Portfolio Advice
+    print("\n--- Getting Live Agent Portfolio Advice ---")
+    agent_advice = None
+    try:
+        # IMPORTANT: Replace 'get_portfolio_management_advice' with the actual method name
+        # in your TradingAgentsGraph class that handles this comprehensive advice.
+        # This method should accept detailed_open_positions and ticker_to_potentially_trade (or similar context)
+        # and return a dict with "position_management" and "new_trade_opportunity" keys.
+        agent_advice = trading_agent.get_portfolio_management_advice(detailed_open_positions, ticker_to_potentially_trade)
+        if agent_advice is None: # Handle case where agent might explicitly return None
+            print("Agent returned no advice (None).")
+            agent_advice = {"position_management": [], "new_trade_opportunity": None} # Default to no actions
+    except AttributeError:
+        print(f"CRITICAL ERROR: `trading_agent` does not have the method `get_portfolio_management_advice`. This method needs to be implemented in TradingAgentsGraph.")
+        print("Falling back to no actions for this cycle.")
+        agent_advice = {"position_management": [], "new_trade_opportunity": None} # Default to no actions
+    except Exception as e:
+        print(f"Error getting portfolio advice from TradingAgentsGraph: {e}")
+        print("Falling back to no actions for this cycle.")
+        agent_advice = {"position_management": [], "new_trade_opportunity": None} # Default to no actions
 
-    # 4. Process Management Actions for Open Positions (Logging only for now)
-    print("\n--- Processing (Mocked) Management Actions ---")
+
+    # 4. Process Management Actions for Open Positions
+    print("\n--- Processing Management Actions ---")
     if agent_advice.get("position_management"):
         for advice in agent_advice["position_management"]:
             log_msg_parts = [
@@ -461,68 +478,6 @@ def run_trading_cycle(ticker_to_potentially_trade): # RENAMED and parameter clar
         print("No new high-conviction trade opportunities advised by agent in this cycle.")
 
     print(f"\n--- Trading cycle complete for {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---")
-
-# --- Mock Agent Response Function ---
-def get_mocked_agent_portfolio_advice(detailed_open_positions, potential_new_trade_ticker):
-    """
-    Mocks the response from TradingAgentsGraph for portfolio management advice.
-    In a real system, this would involve a call to trading_agent.propagate() or a similar method
-    with detailed_open_positions and potentially potential_new_trade_ticker.
-    """
-    print(f"DEBUG: Mocking agent advice for {len(detailed_open_positions)} open positions and new look at {potential_new_trade_ticker}.")
-    management_actions = []
-    new_trade_decision = None
-
-    # Example logic for managing open positions (mocked)
-    for i, pos in enumerate(detailed_open_positions):
-        # Simple mock: cycle through actions for variety if multiple positions
-        action_type_index = i % 4 # Cycle through 0: HOLD, 1: REDUCE, 2: CLOSE, 3: ADD
-
-        if action_type_index == 1 and pos['unrealized_pl_pct'] > 1.0 : # Try to reduce if some profit
-             management_actions.append({
-                'symbol': pos['symbol'], 'action': 'REDUCE',
-                'quantity': max(1, int(pos['qty'] * 0.1)), # Sell 10% or at least 1 share
-                'reason': f"Mock: Profitable ({pos['unrealized_pl_pct']:.2f}%), suggest REDUCE."
-            })
-        elif action_type_index == 2 and pos['unrealized_pl_pct'] < -1.0: # Try to close if some loss
-            management_actions.append({
-                'symbol': pos['symbol'], 'action': 'CLOSE',
-                'reason': f"Mock: Losing ({pos['unrealized_pl_pct']:.2f}%), suggest CLOSE."
-            })
-        elif action_type_index == 3 and pos['unrealized_pl_pct'] > 0.5: # Try to add if slightly positive and it's its turn
-            management_actions.append({
-                'symbol': pos['symbol'], 'action': 'ADD',
-                'quantity': max(1, int(pos['qty'] * 0.05)), # Add 5% or at least 1 share
-                'reason': f"Mock: Slightly positive ({pos['unrealized_pl_pct']:.2f}%) and conditions seem okay, suggest ADD."
-            })
-        else: # Default to HOLD or if conditions for other actions not met
-            management_actions.append({
-                'symbol': pos['symbol'], 'action': 'HOLD',
-                'reason': f"Mock: Defaulting to HOLD for {pos['symbol']} ({pos['unrealized_pl_pct']:.2f}%)."
-            })
-
-    # Example logic for new trade opportunity (mocked)
-    # Let's say we only suggest a new trade if there are few open positions or on a specific ticker
-    if len(detailed_open_positions) < 3 and potential_new_trade_ticker == "GOOGL": # Arbitrary condition
-        new_trade_decision = {
-            'symbol': potential_new_trade_ticker,
-            'decision': 'BUY', # Could be BUY or SELL
-            'conviction_score': 0.75, # Example conviction
-            'reason': f'Mock: Favorable conditions for {potential_new_trade_ticker} and portfolio has capacity.'
-        }
-    elif potential_new_trade_ticker == "MSFT": # Another arbitrary condition for variety
-         new_trade_decision = {
-            'symbol': potential_new_trade_ticker,
-            'decision': 'SELL', # Example short sell
-            'conviction_score': 0.65,
-            'reason': f'Mock: Bearish signal on {potential_new_trade_ticker}.'
-        }
-
-
-    return {
-        "position_management": management_actions,
-        "new_trade_opportunity": new_trade_decision
-    }
 
 
 if __name__ == "__main__":
