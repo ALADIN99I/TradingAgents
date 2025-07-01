@@ -269,3 +269,53 @@ if self.config["llm_provider"].lower() == "openai" or self.config["llm_provider"
     def process_signal(self, full_signal):
         """Process a signal to extract the core decision."""
         return self.signal_processor.process_signal(full_signal)
+
+    def get_portfolio_management_advice(
+        self, detailed_open_positions: List[Dict[str, Any]], ticker_to_potentially_trade: str
+    ) -> Dict[str, Any]:
+        """
+        Analyzes open positions and a potential new trade, returning structured advice.
+
+        Args:
+            detailed_open_positions: A list of dictionaries, each representing an open position.
+                                     Expected keys: "symbol", "qty", "avg_entry_price",
+                                                    "market_price", "unrealized_pl", "unrealized_pl_pct".
+            ticker_to_potentially_trade: The ticker symbol for a potential new trade.
+
+        Returns:
+            A dictionary structured as:
+            {
+                "position_management": [
+                    // e.g., {'symbol': 'AAPL', 'action': 'HOLD', 'reason': 'Monitoring position.'}
+                ],
+                "new_trade_opportunity": // e.g., {'symbol': 'GOOGL', 'decision': 'BUY', 'conviction_score': 0.75, 'reason': 'Positive outlook.'} or None
+            }
+        """
+        position_management_advice = []
+        for position in detailed_open_positions:
+            # Placeholder logic: Advise to HOLD all current positions
+            position_management_advice.append(
+                {
+                    "symbol": position["symbol"],
+                    "action": "HOLD",
+                    "reason": "Placeholder: Monitoring position based on initial assessment.",
+                }
+            )
+
+        # Placeholder logic: Advise to BUY the potential new ticker
+        new_trade_opportunity_advice = {
+            "symbol": ticker_to_potentially_trade,
+            "decision": "BUY",
+            "conviction_score": 0.75,  # Placeholder conviction score
+            "reason": "Placeholder: Initial analysis suggests a potential buying opportunity.",
+        }
+
+        # In a real scenario, if no new trade is advised, this could be None
+        # For now, we always return a BUY opportunity for testing integration
+        # if not ticker_to_potentially_trade:
+        #     new_trade_opportunity_advice = None
+
+        return {
+            "position_management": position_management_advice,
+            "new_trade_opportunity": new_trade_opportunity_advice,
+        }
