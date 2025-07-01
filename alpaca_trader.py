@@ -69,7 +69,7 @@ else:
     # Default config uses OpenAI, ensure OPENAI_API_KEY is set.
     # Also, the TradingAgents framework uses Finnhub, so FINNHUB_API_KEY should be set.
 
-trading_agent = TradingAgentsGraph(debug=False, config=config)
+trading_agent = TradingAgentsGraph(debug=True, config=config) # Enabled debug mode
 print("TradingAgentsGraph initialized.")
 
 def get_account_state(api): # Removed ticker parameter
@@ -186,8 +186,19 @@ def execute_trade_logic(api, data_api, agent, ticker, decision, conviction_score
             elif management_action == "CLOSE":
                 log.info(f"Management Action: CLOSE for {ticker}. Attempting to close position.")
                 try:
-                    closed_order = api.close_position(ticker)
-                    log.info(f"Submitted order to CLOSE position in {ticker}. Order ID: {closed_order.id}")
+                    # 1. Fetch current position
+                    position_to_close = api.get_position(ticker)
+                    qty_to_sell = position_to_close.qty
+
+                    # 2. Submit a market sell order to close
+                    close_order = api.submit_order(
+                        symbol=ticker,
+                        qty=qty_to_sell,
+                        side='sell',
+                        type='market',
+                        time_in_force='day'
+                    )
+                    log.info(f"Market SELL order to close {qty_to_sell} shares of {ticker} placed. Order ID: {close_order.id}")
                 except Exception as e:
                     log.error(f"Error trying to CLOSE position in {ticker}: {e}")
             elif management_action == "REDUCE":
@@ -359,31 +370,57 @@ def run_trading_cycle(ticker_to_potentially_trade): # RENAMED and parameter clar
                 # Fallback to basic info if API call fails
                 detailed_open_positions.append({"symbol": position.symbol, "qty": float(position.qty), "avg_entry_price": float(position.avg_entry_price), "market_price": float(position.current_price), "unrealized_pl": float(position.unrealized_pl), "unrealized_pl_pct": float(position.unrealized_plpc) * 100})
 
-    # 3. Get Live Agent Portfolio Advice
-    print("\n--- Getting Live Agent Portfolio Advice ---")
-    agent_advice = None
-    try:
-        # IMPORTANT: Replace 'get_portfolio_management_advice' with the actual method name
-        # in your TradingAgentsGraph class that handles this comprehensive advice.
-        # This method should accept detailed_open_positions and ticker_to_potentially_trade (or similar context)
-        # and return a dict with "position_management" and "new_trade_opportunity" keys.
-        agent_advice = trading_agent.get_portfolio_management_advice(detailed_open_positions, ticker_to_potentially_trade)
-        if agent_advice is None: # Handle case where agent might explicitly return None
-            print("Agent returned no advice (None).")
-            agent_advice = {"position_management": [], "new_trade_opportunity": None} # Default to no actions
-    except AttributeError:
-        print(f"CRITICAL ERROR: `trading_agent` does not have the method `get_portfolio_management_advice`. This method needs to be implemented in TradingAgentsGraph.")
-        print("Falling back to no actions for this cycle.")
-        agent_advice = {"position_management": [], "new_trade_opportunity": None} # Default to no actions
-    except Exception as e:
-        print(f"Error getting portfolio advice from TradingAgentsGraph: {e}")
-        print("Falling back to no actions for this cycle.")
-        agent_advice = {"position_management": [], "new_trade_opportunity": None} # Default to no actions
+    # 3. Get Live Agent Portfolio Advice (New Trade Decision + Position Management)
+    print("\n--- Running Full Agent Debate Pipeline for New Trade Decision ---")
+    new_trade_decision = None
+    position_management_advice = []
+    agent_advice = {} # Initialize agent_advice
 
+    try:
+        # This triggers all analysts and debates sequentially (can take time)
+        # The get_new_trade_decision method now takes detailed_open_positions for context
+        new_trade_decision = trading_agent.get_new_trade_decision(ticker_to_potentially_trade, detailed_open_positions)
+    except Exception as e:
+        print(f"Error getting new trade decision from TradingAgentsGraph: {e}")
+        print("Falling back to no new trade action for this cycle.")
+        new_trade_decision = {
+            "symbol": ticker_to_potentially_trade,
+            "decision": "NONE",
+            "conviction_score": 0.0,
+            "reason": f"Error in get_new_trade_decision: {e}"
+        }
+
+    print("\n--- Getting Position Management Advice ---")
+    try:
+        # Get position management advice separately
+        management_advice_full = trading_agent.get_portfolio_management_advice(
+            detailed_open_positions,
+            ticker_to_potentially_trade # Pass ticker for context, though it's mainly for open positions
+        )
+        if management_advice_full and "position_management" in management_advice_full:
+            position_management_advice = management_advice_full["position_management"]
+        else:
+            print("Warning: No 'position_management' key in advice from get_portfolio_management_advice.")
+            position_management_advice = []
+
+    except AttributeError as ae:
+        print(f"CRITICAL ERROR: `trading_agent` does not have the method `get_portfolio_management_advice`. This method needs to be implemented in TradingAgentsGraph. {ae}")
+        position_management_advice = []
+    except Exception as e:
+        print(f"Error getting position management advice from TradingAgentsGraph: {e}")
+        print("Falling back to no management actions for this cycle.")
+        position_management_advice = []
+
+    # Combine into the agent_advice structure
+    agent_advice = {
+        "position_management": position_management_advice,
+        "new_trade_opportunity": new_trade_decision
+    }
 
     # 4. Process Management Actions for Open Positions
     print("\n--- Processing Management Actions ---")
-    if agent_advice.get("position_management"):
+    # Use the locally scoped position_management_advice which has been error handled
+    if position_management_advice:
         for advice in agent_advice["position_management"]:
             # Add this check to validate the advice object
             if not all(k in advice for k in ("symbol", "action")):
