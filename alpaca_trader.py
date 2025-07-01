@@ -3,13 +3,13 @@ from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
 from datetime import datetime
 import os
+from alpaca.data.historical import StockHistoricalDataClient
+from alpaca.data.requests import StockBarsRequest
+from alpaca.data.timeframe import TimeFrame
 
 #os api method for now only
 # IMPORTANT: This MUST be a real OpenAI API key for embeddings to work.
-os.environ["_API_KEY"] = "nan"
-os.environ["FINNHUB_API_KEY"] = "d0u99jhr01qn5fk3v8rgd0u99jhr01qn5fk3v8s0" # <--- You can also add your Finnhub key here
-# This is for OpenRouter chat models.
-os.environ["O_API_KEY"] = ""
+
 # --- Alpaca API Configuration ---
 # --- Alpaca API Configuration ---
 # WARNING: API keys are hardcoded below as per user request.
@@ -23,12 +23,14 @@ BASE_URL = 'https://paper-api.alpaca.markets' # Defaulting to paper trading
 try:
     print(f"Attempting to connect to Alpaca with Key ID: {API_KEY[-4:]} at URL: {BASE_URL}")
     alpaca_api = tradeapi.REST(API_KEY, API_SECRET, base_url=BASE_URL)
+    data_client = StockHistoricalDataClient(API_KEY, API_SECRET) # Add this line
     # Check if the API connection is successful
     account_info = alpaca_api.get_account()
     print(f"Successfully connected to Alpaca. Account ID: {account_info.id}")
 except Exception as e:
     print(f"Error connecting to Alpaca API: {e}")
     alpaca_api = None # Set to None if connection fails
+    data_client = None # Also set data_client to None
 
 # --- TradingAgents Configuration ---
 # Default configuration uses OpenAI. Below shows how to configure for OpenRouter.
@@ -106,7 +108,7 @@ def calculate_position_size(equity, last_price):
     position_size = dollars_to_risk / last_price
     return int(position_size)
 
-def execute_trade_logic(api, agent, ticker, decision, equity, position): #PARAMETER CHANGE
+def execute_trade_logic(api, data_api, agent, ticker, decision, equity, position): #PARAMETER CHANGE
     """Contains the logic to BUY, SELL, or HOLD."""
     #log import
     import logging
@@ -114,10 +116,16 @@ def execute_trade_logic(api, agent, ticker, decision, equity, position): #PARAME
 
     log.info(f"Executing trade logic for {ticker}. Decision: {decision}. Equity: {equity:.2f}. Position: {position}")
     try:
-        # Get the most recent 1-minute bar for the stock.
-        barset = api.get_bars(ticker, '1Min', limit=1)
-        if barset and ticker in barset and barset[ticker]:
-            last_price = barset[ticker][0].c  # 'c' is the close price of the bar
+        # Get the most recent 1-minute bar for the stock using the new data_api client
+        request_params = StockBarsRequest(
+                            symbol_or_symbols=[ticker],
+                            timeframe=TimeFrame.Minute,
+                            limit=1
+                         )
+        barset = data_api.get_stock_bars(request_params)
+
+        if barset and barset[ticker]:
+            last_price = barset[ticker][0].close  # Use .close instead of .c
         else:
             log.error(f"Could not get last price for {ticker}. No bar data found.")
             return # Exit if we can't get the price
@@ -168,7 +176,7 @@ def execute_trade_logic(api, agent, ticker, decision, equity, position): #PARAME
     except Exception as e:
         log.error(f"Error in trade logic for {ticker}: {e}")
 
-def test_buy_logic_simulation(api, ticker, equity):
+def test_buy_logic_simulation(data_api, ticker, equity): #PARAMETER CHANGE
     #log import
     import logging # Ensure log is available if not globally configured for this scope
     log = logging.getLogger(__name__)
@@ -176,9 +184,14 @@ def test_buy_logic_simulation(api, ticker, equity):
 
     try:
         # 1. Get Price (as in execute_trade_logic)
-        barset = api.get_bars(ticker, '1Min', limit=1)
-        if barset and ticker in barset and barset[ticker]:
-            last_price = barset[ticker][0].c
+        request_params = StockBarsRequest(
+                            symbol_or_symbols=[ticker],
+                            timeframe=TimeFrame.Minute,
+                            limit=1
+                         )
+        barset = data_api.get_stock_bars(request_params)
+        if barset and barset[ticker]:
+            last_price = barset[ticker][0].close # Use .close instead of .c
             log.info(f"[SIMULATION] Fetched last price: {last_price} for {ticker}")
         else:
             log.error(f"[SIMULATION] Could not get last price for {ticker}. No bar data found.")
@@ -199,7 +212,7 @@ def test_buy_logic_simulation(api, ticker, equity):
 
 def run_daily_trading_session(ticker_symbol):
     """Runs the full trading session for a given ticker."""
-    if alpaca_api is None:
+    if alpaca_api is None or data_client is None: # check for data_client
         print(f"Cannot run trading session for {ticker_symbol}: Alpaca API not connected.")
         return
 
@@ -228,7 +241,7 @@ def run_daily_trading_session(ticker_symbol):
         return
 
     # 3. Execute
-    execute_trade_logic(alpaca_api, trading_agent, ticker_symbol, agent_decision, current_equity, current_position)
+    execute_trade_logic(alpaca_api, data_client, trading_agent, ticker_symbol, agent_decision, current_equity, current_position)
 
     print(f"--- Trading session for {ticker_symbol} complete ---")
 
@@ -238,7 +251,8 @@ if __name__ == "__main__":
     # Example: export ALPACA_API_KEY='YOUR_KEY'
     #          export ALPACA_API_SECRET='YOUR_SECRET'
     # You might also need to set OPENAI_API_KEY and FINNHUB_API_KEY for the TradingAgents framework.
-
+    log_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'logs', 'alpaca_trader.log') 
+    
 
     ticker_to_trade = "GOOGL"  # Example: Trade SPDR S&P 500 ETF Trust
     # You can add more tickers to trade in a loop or manage a portfolio
@@ -247,18 +261,19 @@ if __name__ == "__main__":
     # for ticker in portfolio_tickers:
     #     run_daily_trading_session(ticker)
 
-    if API_KEY == 'YOUR_API_KEY_HERE' or API_SECRET == 'YOUR_API_SECRET_HERE':
+    """if API_KEY == 'YOUR_API_KEY_HERE' or API_SECRET == 'YOUR_API_SECRET_HERE':
         print("\nWARNING: Alpaca API keys are placeholders. Please set them environment variables (ALPACA_API_KEY, ALPACA_API_SECRET) or directly in the script for testing.")
         print("Using placeholders will likely result in authentication errors with the Alpaca API.")
-
-    if alpaca_api is not None: # Only run if API connection was successful
-        print("\n--- Running Simulated Buy Logic Test ---")
+"""
+    if alpaca_api is not None :#and data_client is not None: # Only run if API connection was successful
+        """print("\n--- Running Simulated Buy Logic Test ---")
         test_equity = 50000 # Example equity, adjust as needed
-        test_buy_logic_simulation(alpaca_api, ticker_to_trade, test_equity)
-        print("--- Simulated Buy Logic Test Complete ---\n")
+        # Pass the data_client to the simulation function
+        test_buy_logic_simulation(data_client, ticker_to_trade, test_equity)
+        print("--- Simulated Buy Logic Test Complete ---\n")"""
 
-        # Decide whether to proceed with the actual trading session or comment out for testing
-        # run_daily_trading_session(ticker_to_trade)
+        # When you run the actual session, you'll need to pass both clients
+        run_daily_trading_session(ticker_to_trade)
     else:
         print("\nCannot start trading session: Alpaca API connection failed at initialization.")
 
