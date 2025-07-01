@@ -102,16 +102,32 @@ def get_account_state(api, ticker):
 
     return equity, position
 
-def calculate_position_size(equity, last_price):
+def calculate_position_size(equity, last_price, conviction_score):
     """
-    Calculates the position size based on a predefined risk percentage of equity.
+    Calculates the position size based on equity, price, and a conviction score.
     """
-    risk_per_trade = 0.02  # 2% of equity
+    # Determine risk_per_trade based on conviction_score
+    if 0.8 <= conviction_score <= 1.0:
+        risk_per_trade = 0.02  # High Conviction: 2.0%
+    elif 0.6 <= conviction_score < 0.8:
+        risk_per_trade = 0.015  # Medium-High Conviction: 1.5%
+    elif 0.4 <= conviction_score < 0.6:
+        risk_per_trade = 0.01  # Medium Conviction: 1.0%
+    elif 0.2 <= conviction_score < 0.4:
+        risk_per_trade = 0.005  # Low Conviction (Scout Mode): 0.5%
+    else: # conviction_score < 0.2
+        risk_per_trade = 0.0   # Very Low Conviction / Disagreement: 0%
+
+    if risk_per_trade == 0.0:
+        return 0 # No trade if risk is 0
+
     dollars_to_risk = equity * risk_per_trade
+    if last_price <= 0: # Prevent division by zero or negative price
+        return 0
     position_size = dollars_to_risk / last_price
     return int(position_size)
 
-def execute_trade_logic(api, data_api, agent, ticker, decision, equity, position): #PARAMETER CHANGE
+def execute_trade_logic(api, data_api, agent, ticker, decision, conviction_score, equity, position): # PARAMETER CHANGE
     """Contains the logic to BUY, SELL, or HOLD."""
     #log import
     import logging
@@ -143,9 +159,9 @@ def execute_trade_logic(api, data_api, agent, ticker, decision, equity, position
         else:
             # No position, so we can either open a new position or do nothing
             if decision == "BUY":
-                log.info(f"Action: Attempting to BUY {ticker}")
-                qty = calculate_position_size(equity, last_price)
-                log.info(f"Calculated position size: {qty} shares of {ticker}")
+                log.info(f"Action: Attempting to BUY {ticker} with conviction {conviction_score}")
+                qty = calculate_position_size(equity, last_price, conviction_score)
+                log.info(f"Calculated position size: {qty} shares of {ticker} based on conviction {conviction_score}")
                 if qty > 0:
                     api.submit_order(
                         symbol=ticker,
@@ -159,9 +175,9 @@ def execute_trade_logic(api, data_api, agent, ticker, decision, equity, position
                     log.info(f"Position size is 0 for {ticker}. No trade executed.")
 
             elif decision == "SELL":
-                log.info(f"Action: Attempting to SELL (short) {ticker}")
-                qty = calculate_position_size(equity, last_price)
-                log.info(f"Calculated position size: {qty} shares of {ticker}")
+                log.info(f"Action: Attempting to SELL (short) {ticker} with conviction {conviction_score}")
+                qty = calculate_position_size(equity, last_price, conviction_score)
+                log.info(f"Calculated position size: {qty} shares of {ticker} based on conviction {conviction_score}")
                 if qty > 0:
                     api.submit_order(
                         symbol=ticker,
@@ -179,11 +195,11 @@ def execute_trade_logic(api, data_api, agent, ticker, decision, equity, position
     except Exception as e:
         log.error(f"Error in trade logic for {ticker}: {e}")
 
-def test_buy_logic_simulation(data_api, ticker, equity): #PARAMETER CHANGE
+def test_buy_logic_simulation(data_api, ticker, equity, conviction_score): # PARAMETER CHANGE
     #log import
     import logging # Ensure log is available if not globally configured for this scope
     log = logging.getLogger(__name__)
-    log.info(f"[SIMULATION] Testing BUY logic for {ticker} with equity {equity}")
+    log.info(f"[SIMULATION] Testing BUY logic for {ticker} with equity {equity} and conviction {conviction_score}")
 
     try:
         # 1. Get Price (as in execute_trade_logic)
@@ -201,8 +217,8 @@ def test_buy_logic_simulation(data_api, ticker, equity): #PARAMETER CHANGE
             return
 
         # 2. Calculate Position Size (as in execute_trade_logic)
-        qty = calculate_position_size(equity, last_price)
-        log.info(f"[SIMULATION] Calculated position size: {qty} shares of {ticker}")
+        qty = calculate_position_size(equity, last_price, conviction_score) # PASS conviction_score
+        log.info(f"[SIMULATION] Calculated position size: {qty} shares of {ticker} (Conviction: {conviction_score})")
 
         if qty > 0:
             log.info(f"[SIMULATION] Would attempt to submit BUY order for {qty} shares of {ticker}.")
@@ -235,16 +251,34 @@ def run_daily_trading_session(ticker_symbol):
     print(f"Requesting trading decision for {ticker_symbol} for date: {analysis_date_str}...")
     try:
         # The propagate method in the example returns _, decision.
-        # Assuming the first returned value is state or similar, and second is the decision string.
-        _, agent_decision = trading_agent.propagate(ticker_symbol, analysis_date_str)
-        print(f"Agent Decision for {ticker_symbol}: {agent_decision}")
+        # UPDATED ASSUMPTION: now returns (decision, conviction_score)
+        # We are discarding the first element (state) if it's still returned, or adjusting if the signature changed.
+        # For now, assuming propagate returns: (state_or_similar, (decision, conviction_score)) or just (decision, conviction_score)
+        # Let's assume it returns (decision, conviction_score) directly for simplicity here.
+        # If it's nested, like (_, (decision, conviction_score)), this will need adjustment.
+        raw_output = trading_agent.propagate(ticker_symbol, analysis_date_str)
+        if isinstance(raw_output, tuple) and len(raw_output) == 2 and isinstance(raw_output[1], tuple) and len(raw_output[1]) == 2): # Check for (_, (decision, conviction_score))
+            _, (agent_decision, conviction_score) = raw_output
+        elif isinstance(raw_output, tuple) and len(raw_output) == 2: # Check for (decision, conviction_score)
+             agent_decision, conviction_score = raw_output
+        else:
+            # Fallback or error if the structure isn't as expected.
+            # For now, let's assume a default high conviction if structure is old, to prevent crashes, and log a warning.
+            # This part would need to be robustly handled based on actual TradingAgentsGraph output.
+            print(f"Warning: Unexpected output structure from trading_agent.propagate(): {raw_output}. Defaulting conviction.")
+            agent_decision = raw_output[1] if isinstance(raw_output, tuple) and len(raw_output) > 1 else "HOLD" # Default based on old structure
+            conviction_score = 0.0 # Default to no trade if structure is unknown or decision is HOLD
+            if agent_decision == "BUY" or agent_decision == "SELL":
+                conviction_score = 0.8 # Default to high conviction for BUY/SELL if score is missing
+
+        print(f"Agent Decision for {ticker_symbol}: {agent_decision} with Conviction: {conviction_score:.2f}")
     except Exception as e:
         print(f"Error getting decision from TradingAgentsGraph for {ticker_symbol}: {e}")
         print("--- Trading session complete ---")
         return
 
     # 3. Execute
-    execute_trade_logic(alpaca_api, data_client, trading_agent, ticker_symbol, agent_decision, current_equity, current_position)
+    execute_trade_logic(alpaca_api, data_client, trading_agent, ticker_symbol, agent_decision, conviction_score, current_equity, current_position)
 
     print(f"--- Trading session for {ticker_symbol} complete ---")
 
@@ -270,8 +304,9 @@ if __name__ == "__main__":
     if alpaca_api is not None and data_client is not None: # Only run if API connection was successful
         print("\n--- Running Simulated Buy Logic Test ---")
         test_equity = 50000 # Example equity, adjust as needed
-        # Pass the data_client to the simulation function
-        test_buy_logic_simulation(data_client, ticker_to_trade, test_equity)
+        test_conviction = 0.85 # Example: High conviction for testing
+        # Pass the data_client and conviction_score to the simulation function
+        test_buy_logic_simulation(data_client, ticker_to_trade, test_equity, test_conviction)
         print("--- Simulated Buy Logic Test Complete ---\n")
 
         # When you run the actual session, you'll need to pass both clients
