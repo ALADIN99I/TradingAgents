@@ -3,7 +3,7 @@
 import os
 from pathlib import Path
 import json
-from datetime import date
+from datetime import date # Ensure date is imported
 from typing import Dict, Any, Tuple, List, Optional
 
 from langchain_openai import ChatOpenAI
@@ -385,3 +385,145 @@ Provide only the JSON output. Do not include any other explanatory text before o
                 "position_management": placeholder_position_management,
                 "new_trade_opportunity": placeholder_new_trade,
             }
+
+    # Helper to get base context (market, news, fundamentals reports)
+    def _get_base_research_context(self, symbol: str) -> Dict[str, str]:
+        # This method attempts to use existing state or falls back to placeholders.
+        # For a truly independent debate, this might need to trigger data fetching.
+        # The original full debate likely happens after self.propagate() populates self.curr_state.
+        if self.curr_state and self.curr_state.get('company_of_interest') == symbol:
+            print(f"Using existing context from self.curr_state for {symbol} for debate.")
+            return {
+                "market_report": self.curr_state.get("market_report", f"Market report for {symbol} not available in curr_state."),
+                "sentiment_report": self.curr_state.get("sentiment_report", f"Sentiment report for {symbol} not available in curr_state."),
+                "news_report": self.curr_state.get("news_report", f"News report for {symbol} not available in curr_state."),
+                "fundamentals_report": self.curr_state.get("fundamentals_report", f"Fundamentals report for {symbol} not available in curr_state."),
+            }
+        else:
+            # This is a critical fallback. Ideally, if get_new_trade_decision is called for a new symbol,
+            # it should first run the data gathering part of the graph (analyst nodes).
+            # The user's description "This triggers all analysts and debates sequentially" for the new call
+            # implies that get_new_trade_decision should indeed fetch this data.
+            # For now, this is a simplified version. A more robust solution would involve
+            # invoking the analyst nodes from self.graph for the given symbol if data isn't fresh.
+            print(f"Warning: No current state for {symbol}. Analyst reports for debate will be placeholders or fetched ad-hoc if implemented.")
+            print("Attempting to run initial graph propagation to gather data for new trade decision...")
+            try:
+                # Attempt to run the graph to populate self.curr_state for the new symbol
+                # This is a simplified way to ensure data is present.
+                # The propagate method itself returns final_state, signal
+                # We are interested in self.curr_state being updated.
+                self.propagate(company_name=symbol, trade_date=date.today().isoformat())
+                if self.curr_state and self.curr_state.get('company_of_interest') == symbol:
+                    print(f"Data gathered successfully for {symbol} via internal propagate call.")
+                    return {
+                        "market_report": self.curr_state.get("market_report", f"Market report for {symbol} not available post-propagate."),
+                        "sentiment_report": self.curr_state.get("sentiment_report", f"Sentiment report for {symbol} not available post-propagate."),
+                        "news_report": self.curr_state.get("news_report", f"News report for {symbol} not available post-propagate."),
+                        "fundamentals_report": self.curr_state.get("fundamentals_report", f"Fundamentals report for {symbol} not available post-propagate."),
+                    }
+                else:
+                    print(f"Failed to gather data for {symbol} via internal propagate call. curr_state not updated as expected.")
+            except Exception as e:
+                print(f"Error during ad-hoc data gathering for {symbol} in _get_base_research_context: {e}")
+
+            # Fallback if propagation failed or didn't update as expected
+            return {
+                "market_report": f"Market report for {symbol} could not be fetched.",
+                "sentiment_report": f"Sentiment report for {symbol} could not be fetched.",
+                "news_report": f"News report for {symbol} could not be fetched.",
+                "fundamentals_report": f"Fundamentals report for {symbol} could not be fetched.",
+            }
+
+    def _get_bull_thesis(self, symbol: str) -> str:
+        context = self._get_base_research_context(symbol)
+        prompt = f"""You are a Bull Analyst advocating for investing in {symbol}.
+        Leverage the provided research:
+        Market research: {context['market_report']}
+        Sentiment: {context['sentiment_report']}
+        News: {context['news_report']}
+        Fundamentals: {context['fundamentals_report']}
+        Build a strong, evidence-based case for a BUY decision. Emphasize growth, competitive advantages, and positive indicators for {symbol}.
+        Output only your bullish thesis.
+        """
+        response = self.deep_thinking_llm.invoke(prompt)
+        return response.content
+
+    def _get_bear_thesis(self, symbol: str) -> str:
+        context = self._get_base_research_context(symbol)
+        prompt = f"""You are a Bear Analyst making the case against investing in {symbol}.
+        Leverage the provided research:
+        Market research: {context['market_report']}
+        Sentiment: {context['sentiment_report']}
+        News: {context['news_report']}
+        Fundamentals: {context['fundamentals_report']}
+        Build a strong, evidence-based case for a SELL or AVOID decision. Emphasize risks, challenges, and negative indicators for {symbol}.
+        Output only your bearish thesis.
+        """
+        response = self.deep_thinking_llm.invoke(prompt)
+        return response.content
+
+    def _get_trader_decision_from_theses(self, symbol: str, bull_thesis: str, bear_thesis: str, portfolio_positions: List[Dict[str, Any]]) -> Dict[str, Any]:
+        portfolio_json = json.dumps(portfolio_positions, indent=2)
+        prompt = f"""You are a Trader deciding on a new trade for {symbol}.
+        You have received the following analyses:
+        Bullish Thesis: "{bull_thesis}"
+        Bearish Thesis: "{bear_thesis}"
+
+        Your Current Portfolio:
+        {portfolio_json}
+
+        Based on these theses and your current portfolio, provide a new trade decision for {symbol}.
+        Output a JSON object with "symbol", "decision" ("BUY", "SELL", "NONE"), "conviction_score" (0.0-1.0), and "reason".
+        Example: {{"symbol": "{symbol}", "decision": "BUY", "conviction_score": 0.75, "reason": "Bull thesis is compelling despite bear points, and it fits portfolio."}}
+        If no trade, use "decision": "NONE", "conviction_score": 0.0.
+        Provide only the JSON output.
+        """
+        response = self.deep_thinking_llm.invoke(prompt)
+        try:
+            llm_output_content = response.content
+            if llm_output_content.startswith("```json"):
+                llm_output_content = llm_output_content[7:]
+            if llm_output_content.endswith("```"):
+                llm_output_content = llm_output_content[:-3]
+            llm_output_content = llm_output_content.strip()
+            decision = json.loads(llm_output_content)
+            if not all(k in decision for k in ("symbol", "decision", "conviction_score", "reason")):
+                raise ValueError("Missing required keys in trader decision")
+            return decision
+        except Exception as e:
+            print(f"Error parsing trader decision for {symbol}: {e}. LLM Output: {response.content}")
+            return {"symbol": symbol, "decision": "NONE", "conviction_score": 0.0, "reason": f"Error in processing trader decision: {e}"}
+
+    def get_new_trade_decision(self, symbol: str, detailed_open_positions: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Orchestrates a multi-agent debate for a robust new-trade decision.
+        This method now attempts to gather fresh analyst data by calling self.propagate if needed.
+        """
+        print(f"\n--- Initiating Multi-Agent Debate for New Trade on {symbol} ---")
+
+        # This will attempt to run the graph if context for the symbol isn't already in self.curr_state
+        # _get_base_research_context now calls self.propagate if necessary.
+
+        # 1. Bull Agent’s bullish thesis
+        print(f"--- Generating Bullish Thesis for {symbol}... ---")
+        bull_research = self._get_bull_thesis(symbol) # _get_base_research_context is called within this
+        print(f"Bull research for {symbol} obtained.")
+
+        # 2. Bear Agent’s bearish thesis
+        print(f"--- Generating Bearish Thesis for {symbol}... ---")
+        bear_research = self._get_bear_thesis(symbol) # _get_base_research_context is called within this
+        print(f"Bear research for {symbol} obtained.")
+
+        # 3. Trader Agent’s final verdict
+        print(f"--- Trader Agent Deliberating on {symbol}... ---")
+        final_trade_decision = self._get_trader_decision_from_theses(
+            symbol=symbol,
+            bull_thesis=bull_research,
+            bear_thesis=bear_research,
+            portfolio_positions=detailed_open_positions
+        )
+        print(f"Trader agent final decision for {symbol} obtained.")
+
+        print("--- Multi-Agent Debate Concluded ---")
+        return final_trade_decision
