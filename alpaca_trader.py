@@ -10,10 +10,11 @@ from alpaca.data.timeframe import TimeFrame
 
 #os api method for now only
 # IMPORTANT: This MUST be a real OpenAI API key for embeddings to work.
-os.environ["_API_KEY"] = "nan"
+os.environ["OPENAI_API_KEY"] = "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"
 os.environ["FINNHUB_API_KEY"] = "d0u99jhr01qn5fk3v8rgd0u99jhr01qn5fk3v8s0" # <--- You can also add your Finnhub key here
 # This is for OpenRouter chat models.
-os.environ["O_API_KEY"] = ""
+os.environ["OPENROUTER_API_KEY"] = "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"
+#
 # --- Alpaca API Configuration ---
 # --- Alpaca API Configuration ---
 # WARNING: API keys are hardcoded below as per user request.
