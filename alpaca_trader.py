@@ -97,104 +97,105 @@ def get_account_state(api, ticker):
 
     return equity, position
 
-def execute_trade_logic(api, agent, ticker, decision, equity, position):
+def calculate_position_size(equity, last_price):
+    """
+    Calculates the position size based on a predefined risk percentage of equity.
+    """
+    risk_per_trade = 0.02  # 2% of equity
+    dollars_to_risk = equity * risk_per_trade
+    position_size = dollars_to_risk / last_price
+    return int(position_size)
+
+def execute_trade_logic(api, agent, ticker, decision, equity, position): #PARAMETER CHANGE
     """Contains the logic to BUY, SELL, or HOLD."""
-    if api is None:
-        print("Alpaca API not initialized. Cannot execute trade logic.")
-        return
+    #log import
+    import logging
+    log = logging.getLogger(__name__) #log definition
 
-    risk_percent = 2.0  # Risk 2% of equity per trade
-    print(f"Executing trade logic for {ticker}. Decision: {decision}. Equity: {equity:.2f}. Position: {'Exists' if position else 'None'}")
+    log.info(f"Executing trade logic for {ticker}. Decision: {decision}. Equity: {equity:.2f}. Position: {position}")
+    try:
+        # Get the most recent 1-minute bar for the stock.
+        barset = api.get_bars(ticker, '1Min', limit=1)
+        if barset and ticker in barset and barset[ticker]:
+            last_price = barset[ticker][0].c  # 'c' is the close price of the bar
+        else:
+            log.error(f"Could not get last price for {ticker}. No bar data found.")
+            return # Exit if we can't get the price
 
-    # --- BUY Logic ---
-    if decision == "BUY" and position is None:
-        if equity <= 0:
-            print(f"Action: Attempting to BUY {ticker}, but equity is ${equity:.2f}. Cannot place buy order.")
+        if position is not None:
+            # We have a position, so we can either hold or sell to close
+            if decision == "SELL":
+                log.info(f"Action: Closing position of {position.qty} shares of {ticker}")
+                api.close_position(ticker)
+            else:  # "BUY" or "HOLD"
+                log.info(f"Action: Holding position in {ticker}")
+        else:
+            # No position, so we can either open a new position or do nothing
+            if decision == "BUY":
+                log.info(f"Action: Attempting to BUY {ticker}")
+                qty = calculate_position_size(equity, last_price)
+                log.info(f"Calculated position size: {qty} shares of {ticker}")
+                if qty > 0:
+                    api.submit_order(
+                        symbol=ticker,
+                        qty=qty,
+                        side='buy',
+                        type='market',
+                        time_in_force='day'
+                    )
+                    log.info(f"Market buy order for {qty} shares of {ticker} placed.")
+                else:
+                    log.info(f"Position size is 0 for {ticker}. No trade executed.")
+
+            elif decision == "SELL":
+                log.info(f"Action: Attempting to SELL (short) {ticker}")
+                qty = calculate_position_size(equity, last_price)
+                log.info(f"Calculated position size: {qty} shares of {ticker}")
+                if qty > 0:
+                    api.submit_order(
+                        symbol=ticker,
+                        qty=qty,
+                        side='sell',
+                        type='market',
+                        time_in_force='day'
+                    )
+                    log.info(f"Market sell (short) order for {qty} shares of {ticker} placed.")
+                else:
+                    log.info(f"Position size is 0 for {ticker}. No trade executed.")
+            else:  # decision == "HOLD"
+                log.info(f"Action: HOLD for {ticker}. No trade executed. (Decision: {decision}, Position: {position})")
+
+    except Exception as e:
+        log.error(f"Error in trade logic for {ticker}: {e}")
+
+def test_buy_logic_simulation(api, ticker, equity):
+    #log import
+    import logging # Ensure log is available if not globally configured for this scope
+    log = logging.getLogger(__name__)
+    log.info(f"[SIMULATION] Testing BUY logic for {ticker} with equity {equity}")
+
+    try:
+        # 1. Get Price (as in execute_trade_logic)
+        barset = api.get_bars(ticker, '1Min', limit=1)
+        if barset and ticker in barset and barset[ticker]:
+            last_price = barset[ticker][0].c
+            log.info(f"[SIMULATION] Fetched last price: {last_price} for {ticker}")
+        else:
+            log.error(f"[SIMULATION] Could not get last price for {ticker}. No bar data found.")
             return
-        print(f"Action: Attempting to BUY {ticker}.")
 
-        # 1. Calculate Position Size
-        investment_amount = equity * (risk_percent / 100)
-        try:
-            # NEW, CORRECTED CODE
-            last_price = api.get_latest_quote(ticker).ap
-        except Exception as e:
-            print(f"Error fetching latest price for {ticker}: {e}. Cannot calculate position size.")
-            return
+        # 2. Calculate Position Size (as in execute_trade_logic)
+        qty = calculate_position_size(equity, last_price)
+        log.info(f"[SIMULATION] Calculated position size: {qty} shares of {ticker}")
 
-        if last_price <= 0:
-            print(f"Latest price for {ticker} is ${last_price:.2f}. Cannot calculate position size.")
-            return
+        if qty > 0:
+            log.info(f"[SIMULATION] Would attempt to submit BUY order for {qty} shares of {ticker}.")
+            # IMPORTANT: Actual api.submit_order(...) is NOT called here
+        else:
+            log.info(f"[SIMULATION] Position size is 0 for {ticker}. No trade would be executed.")
 
-        qty_to_buy = round(investment_amount / last_price, 5)  # Use fractional shares
-
-        if qty_to_buy <= 0:
-            print(f"Calculated quantity to buy for {ticker} is {qty_to_buy}. Cannot place buy order.")
-            return
-
-        # 2. Send Order
-        try:
-            api.submit_order(
-                symbol=ticker,
-                qty=str(qty_to_buy), # API expects qty as string
-                side='buy',
-                type='market',
-                time_in_force='day'
-            )
-            print(f"Market buy order for {qty_to_buy} shares of {ticker} submitted.")
-        except Exception as e:
-            print(f"Error submitting buy order for {ticker}: {e}")
-
-    # --- SELL Logic ---
-    elif decision == "SELL" and position is not None:
-        print(f"Action: Attempting to SELL {ticker}.")
-
-        try:
-            # Ensure position.qty is a float for calculations if needed, though close_position takes symbol
-            # qty_to_sell = float(position.qty) # Not directly used by close_position
-
-            # 1. Send Order to close position
-            # The close_position method returns an order object upon successful submission.
-            # We need to handle the case where the position might be already closed or an error occurs.
-            closed_order_response = api.close_position(ticker)
-            print(f"Market sell order to close position in {ticker} submitted. Order ID: {closed_order_response.id}")
-
-            # 2. Feed outcome back to agent for learning
-            # The Alpaca API's close_position doesn't immediately return realized P/L.
-            # Realized P/L is typically calculated after the order fills.
-            # For simplicity here, we'll assume the trade was successful and log a placeholder.
-            # A more robust solution would involve monitoring the order status and then fetching P/L.
-            # For now, we don't have immediate P/L, so we can't directly use it.
-            # We will call reflect_and_remember.
-            # The existing method in TradingAgentsGraph is `reflect_and_remember(self, returns_losses)`.
-            # `returns_losses` is expected to be a numerical P/L value.
-            # However, immediate realized P/L is not available from `close_position()`.
-            # A robust solution would monitor the order, wait for it to fill, then calculate P/L.
-            # For this integration, we pass a placeholder value (e.g., 0.0) for `returns_losses`.
-            # The agent's reflection mechanism will use its `self.curr_state` (set during `propagate`)
-            # for contextual information.
-            if hasattr(agent, 'reflect_and_remember') and callable(getattr(agent, 'reflect_and_remember')):
-                print(f"Position in {ticker} closed (Order ID: {closed_order_response.id}). Attempting to update agent memory.")
-                # Pass a placeholder for returns_losses.
-                # A real system would calculate this after the sell order is confirmed filled.
-                placeholder_profit_loss = 0.0
-                agent.reflect_and_remember(returns_losses=placeholder_profit_loss)
-                print(f"Agent memory updated for {ticker} using placeholder P/L: {placeholder_profit_loss}.")
-            else:
-                print(f"Warning: 'reflect_and_remember' method not found in trading_agent. Skipping memory update.")
-
-        except tradeapi.rest.APIError as e:
-            if "position not found" in str(e).lower(): # Check if error message indicates no position
-                 print(f"Attempted to sell {ticker}, but no open position found in Alpaca.")
-            else:
-                 print(f"APIError submitting sell order for {ticker}: {e}")
-        except Exception as e:
-            print(f"Error submitting sell order for {ticker}: {e}")
-
-    # --- HOLD Logic ---
-    else:
-        print(f"Action: HOLD for {ticker}. No trade executed. (Decision: {decision}, Position: {'Exists' if position else 'None'})")
-
+    except Exception as e:
+        log.error(f"[SIMULATION] Error during BUY logic simulation for {ticker}: {e}")
 
 def run_daily_trading_session(ticker_symbol):
     """Runs the full trading session for a given ticker."""
@@ -251,7 +252,13 @@ if __name__ == "__main__":
         print("Using placeholders will likely result in authentication errors with the Alpaca API.")
 
     if alpaca_api is not None: # Only run if API connection was successful
-        run_daily_trading_session(ticker_to_trade)
+        print("\n--- Running Simulated Buy Logic Test ---")
+        test_equity = 50000 # Example equity, adjust as needed
+        test_buy_logic_simulation(alpaca_api, ticker_to_trade, test_equity)
+        print("--- Simulated Buy Logic Test Complete ---\n")
+
+        # Decide whether to proceed with the actual trading session or comment out for testing
+        # run_daily_trading_session(ticker_to_trade)
     else:
         print("\nCannot start trading session: Alpaca API connection failed at initialization.")
 
