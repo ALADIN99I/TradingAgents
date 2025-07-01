@@ -303,8 +303,7 @@ Instructions:
 1.  For each position in "Current Open Positions":
     *   Analyze its current status (symbol, quantity, entry price, market price, P&L).
     *   Decide on a management action. Valid actions are: "HOLD", "CLOSE", "REDUCE", "ADD".
-    *   If action is "REDUCE", include "quantity_to_reduce" (integer).
-    *   If action is "ADD", include "quantity_to_add" (integer).
+    *   If action is "REDUCE" or "ADD", include "quantity" (integer).
     *   Provide a brief "reason" for your decision (max 1-2 sentences).
     *   The output for each position should be a JSON object: {{"symbol": "XYZ", "action": "ACTION", "quantity": X (optional), "reason": "Brief reason."}}
 
@@ -324,7 +323,7 @@ Example:
 {{
   "position_management": [
     {{"symbol": "AAPL", "action": "HOLD", "reason": "Monitoring trend."}},
-    {{"symbol": "MSFT", "action": "REDUCE", "quantity_to_reduce": 10, "reason": "Profit target."}}
+    {{"symbol": "MSFT", "action": "REDUCE", "quantity": 10, "reason": "Profit target."}}
   ],
   "new_trade_opportunity": {{"symbol": "GOOGL", "decision": "BUY", "conviction_score": 0.85, "reason": "Breakout."}}
 }}
