@@ -113,20 +113,26 @@ def execute_trade_logic(api, agent, ticker, decision, equity, position): #PARAME
     log = logging.getLogger(__name__) #log definition
 
     log.info(f"Executing trade logic for {ticker}. Decision: {decision}. Equity: {equity:.2f}. Position: {position}")
+    try:
+        # Get the most recent 1-minute bar for the stock.
+        barset = api.get_bars(ticker, '1Min', limit=1)
+        if barset and ticker in barset and barset[ticker]:
+            last_price = barset[ticker][0].c  # 'c' is the close price of the bar
+        else:
+            log.error(f"Could not get last price for {ticker}. No bar data found.")
+            return # Exit if we can't get the price
 
-    if position is not None:
-        # We have a position, so we can either hold or sell to close
-        if decision == "SELL":
-            log.info(f"Action: Closing position of {position.qty} shares of {ticker}")
-            api.close_position(ticker)
-        else: # "BUY" or "HOLD"
-            log.info(f"Action: Holding position in {ticker}")
-    else:
-        # No position, so we can either open a new position or do nothing
-        if decision == "BUY":
-            log.info(f"Action: Attempting to BUY {ticker}")
-            try:
-                last_price = api.get_latest_quote(ticker).askprice #get_last_quote not get_latest_quote
+        if position is not None:
+            # We have a position, so we can either hold or sell to close
+            if decision == "SELL":
+                log.info(f"Action: Closing position of {position.qty} shares of {ticker}")
+                api.close_position(ticker)
+            else:  # "BUY" or "HOLD"
+                log.info(f"Action: Holding position in {ticker}")
+        else:
+            # No position, so we can either open a new position or do nothing
+            if decision == "BUY":
+                log.info(f"Action: Attempting to BUY {ticker}")
                 qty = calculate_position_size(equity, last_price)
                 log.info(f"Calculated position size: {qty} shares of {ticker}")
                 if qty > 0:
@@ -140,13 +146,9 @@ def execute_trade_logic(api, agent, ticker, decision, equity, position): #PARAME
                     log.info(f"Market buy order for {qty} shares of {ticker} placed.")
                 else:
                     log.info(f"Position size is 0 for {ticker}. No trade executed.")
-            except Exception as e:
-                log.error(f"Error fetching latest price for {ticker}: {e}. Cannot calculate position size.")
 
-        elif decision == "SELL":
-            log.info(f"Action: Attempting to SELL (short) {ticker}")
-            try:
-                last_price = api.get_latest_quote(ticker).askprice #get_last_quote not get_latest_quote
+            elif decision == "SELL":
+                log.info(f"Action: Attempting to SELL (short) {ticker}")
                 qty = calculate_position_size(equity, last_price)
                 log.info(f"Calculated position size: {qty} shares of {ticker}")
                 if qty > 0:
@@ -160,10 +162,11 @@ def execute_trade_logic(api, agent, ticker, decision, equity, position): #PARAME
                     log.info(f"Market sell (short) order for {qty} shares of {ticker} placed.")
                 else:
                     log.info(f"Position size is 0 for {ticker}. No trade executed.")
-            except Exception as e:
-                log.error(f"Error fetching latest price for {ticker}: {e}. Cannot calculate position size.")
-        else: # decision == "HOLD"
-            log.info(f"Action: HOLD for {ticker}. No trade executed. (Decision: {decision}, Position: {position})")
+            else:  # decision == "HOLD"
+                log.info(f"Action: HOLD for {ticker}. No trade executed. (Decision: {decision}, Position: {position})")
+
+    except Exception as e:
+        log.error(f"Error in trade logic for {ticker}: {e}")
 
 
 def run_daily_trading_session(ticker_symbol):
