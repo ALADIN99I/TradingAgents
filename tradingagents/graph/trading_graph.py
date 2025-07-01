@@ -274,48 +274,115 @@ if self.config["llm_provider"].lower() == "openai" or self.config["llm_provider"
         self, detailed_open_positions: List[Dict[str, Any]], ticker_to_potentially_trade: str
     ) -> Dict[str, Any]:
         """
-        Analyzes open positions and a potential new trade, returning structured advice.
+        Analyzes open positions and a potential new trade using an LLM, returning structured advice.
 
         Args:
             detailed_open_positions: A list of dictionaries, each representing an open position.
-                                     Expected keys: "symbol", "qty", "avg_entry_price",
-                                                    "market_price", "unrealized_pl", "unrealized_pl_pct".
             ticker_to_potentially_trade: The ticker symbol for a potential new trade.
 
         Returns:
-            A dictionary structured as:
-            {
-                "position_management": [
-                    // e.g., {'symbol': 'AAPL', 'action': 'HOLD', 'reason': 'Monitoring position.'}
-                ],
-                "new_trade_opportunity": // e.g., {'symbol': 'GOOGL', 'decision': 'BUY', 'conviction_score': 0.75, 'reason': 'Positive outlook.'} or None
-            }
+            A dictionary with position management advice and new trade opportunity analysis.
+            Returns placeholder advice on LLM error.
         """
-        position_management_advice = []
-        for position in detailed_open_positions:
-            # Placeholder logic: Advise to HOLD all current positions
-            position_management_advice.append(
-                {
-                    "symbol": position["symbol"],
+        current_date_str = date.today().isoformat()
+        open_positions_json = json.dumps(detailed_open_positions, indent=2)
+
+        prompt_template = """\
+You are an expert portfolio manager and trading analyst. Your task is to review a list of currently open positions and a potential new stock to trade. Provide clear, actionable advice in JSON format.
+
+Today's Date: {current_date}
+
+Current Open Positions:
+{open_positions_json}
+
+Potential New Trade:
+Ticker: {ticker_to_potentially_trade}
+
+Instructions:
+
+1.  For each position in "Current Open Positions":
+    *   Analyze its current status (symbol, quantity, entry price, market price, P&L).
+    *   Decide on a management action. Valid actions are: "HOLD", "CLOSE", "REDUCE", "ADD".
+    *   If action is "REDUCE", include "quantity_to_reduce" (integer).
+    *   If action is "ADD", include "quantity_to_add" (integer).
+    *   Provide a brief "reason" for your decision (max 1-2 sentences).
+    *   The output for each position should be a JSON object: {{"symbol": "XYZ", "action": "ACTION", "quantity": X (optional), "reason": "Brief reason."}}
+
+2.  For the "Potential New Trade" ({ticker_to_potentially_trade}):
+    *   Analyze its potential as a new trade.
+    *   Decide on an action. Valid actions are: "BUY", "SELL" (short), or "NONE".
+    *   Provide a "conviction_score" (float between 0.0 and 1.0). If "NONE", score can be 0.0.
+    *   Provide a brief "reason" (max 1-2 sentences).
+    *   The output should be a JSON object: {{"symbol": "XYZ", "decision": "ACTION", "conviction_score": Y.YY, "reason": "Brief reason."}}. If "decision" is "NONE", this entire object can be null or structured with "decision": "NONE".
+
+Output Format:
+Return a single JSON object with two keys: "position_management" and "new_trade_opportunity".
+"position_management" should be a list of JSON objects (one for each open position).
+"new_trade_opportunity" should be a single JSON object or null.
+
+Example:
+{{
+  "position_management": [
+    {{"symbol": "AAPL", "action": "HOLD", "reason": "Monitoring trend."}},
+    {{"symbol": "MSFT", "action": "REDUCE", "quantity_to_reduce": 10, "reason": "Profit target."}}
+  ],
+  "new_trade_opportunity": {{"symbol": "GOOGL", "decision": "BUY", "conviction_score": 0.85, "reason": "Breakout."}}
+}}
+
+Provide only the JSON output. Do not include any other explanatory text before or after the JSON.
+"""
+        prompt = prompt_template.format(
+            current_date=current_date_str,
+            open_positions_json=open_positions_json,
+            ticker_to_potentially_trade=ticker_to_potentially_trade,
+        )
+
+        try:
+            # Using the deep_thinking_llm for this complex analysis task
+            response = self.deep_thinking_llm.invoke(prompt)
+            llm_output_content = response.content
+
+            # Basic cleaning: LLMs sometimes wrap JSON in backticks or add "json" prefix
+            if llm_output_content.startswith("```json"):
+                llm_output_content = llm_output_content[7:]
+            if llm_output_content.endswith("```"):
+                llm_output_content = llm_output_content[:-3]
+            llm_output_content = llm_output_content.strip()
+
+            parsed_advice = json.loads(llm_output_content)
+
+            # Validate structure (basic validation)
+            if not isinstance(parsed_advice, dict) or \
+               "position_management" not in parsed_advice or \
+               "new_trade_opportunity" not in parsed_advice or \
+               not isinstance(parsed_advice["position_management"], list):
+                raise ValueError("LLM output does not match expected structure.")
+
+            # Further validation can be added here for individual items if needed
+
+            return parsed_advice
+
+        except Exception as e:
+            print(f"Error during LLM call or parsing in get_portfolio_management_advice: {e}")
+            # Fallback to placeholder/default advice
+            placeholder_position_management = []
+            for pos in detailed_open_positions:
+                placeholder_position_management.append({
+                    "symbol": pos["symbol"],
                     "action": "HOLD",
-                    "reason": "Placeholder: Monitoring position based on initial assessment.",
+                    "reason": f"Error in LLM processing: {e}. Defaulting to HOLD.",
+                })
+
+            placeholder_new_trade = None
+            if ticker_to_potentially_trade:
+                placeholder_new_trade = {
+                    "symbol": ticker_to_potentially_trade,
+                    "decision": "NONE",
+                    "conviction_score": 0.0,
+                    "reason": f"Error in LLM processing: {e}. Defaulting to NONE.",
                 }
-            )
 
-        # Placeholder logic: Advise to BUY the potential new ticker
-        new_trade_opportunity_advice = {
-            "symbol": ticker_to_potentially_trade,
-            "decision": "BUY",
-            "conviction_score": 0.75,  # Placeholder conviction score
-            "reason": "Placeholder: Initial analysis suggests a potential buying opportunity.",
-        }
-
-        # In a real scenario, if no new trade is advised, this could be None
-        # For now, we always return a BUY opportunity for testing integration
-        # if not ticker_to_potentially_trade:
-        #     new_trade_opportunity_advice = None
-
-        return {
-            "position_management": position_management_advice,
-            "new_trade_opportunity": new_trade_opportunity_advice,
-        }
+            return {
+                "position_management": placeholder_position_management,
+                "new_trade_opportunity": placeholder_new_trade,
+            }
