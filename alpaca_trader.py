@@ -215,7 +215,26 @@ def execute_trade_logic(api, data_api, agent, ticker, decision, conviction_score
                             log.error(f"Error trying to REDUCE position in {ticker} by {quantity_for_action} shares: {e}")
                 else:
                     log.warning(f"Management Action: REDUCE for {ticker} but quantity_for_action is invalid ({quantity_for_action}). No action taken.")
-            # "ADD" will be implemented later.
+            elif management_action == "ADD":
+                if quantity_for_action and quantity_for_action > 0:
+                    log.info(f"Management Action: ADD for {ticker}. Attempting to buy {quantity_for_action} additional shares.")
+                    try:
+                        # Note: For ADD, last_price might be useful if conviction changes sizing,
+                        # but here we assume quantity_for_action is directly provided.
+                        # If last_price was fetched earlier (e.g., because management_action was initially "ADD"
+                        # in the conditional price fetching), it could be used for logging or other checks.
+                        add_order = api.submit_order(
+                            symbol=ticker,
+                            qty=quantity_for_action,
+                            side='buy',
+                            type='market',
+                            time_in_force='day'
+                        )
+                        log.info(f"Submitted order to ADD {quantity_for_action} shares to position in {ticker}. Order ID: {add_order.id}")
+                    except Exception as e:
+                        log.error(f"Error trying to ADD {quantity_for_action} shares to position in {ticker}: {e}")
+                else:
+                    log.warning(f"Management Action: ADD for {ticker} but quantity_for_action is invalid ({quantity_for_action}). No action taken.")
             else:
                 log.info(f"Management Action: {management_action} for {ticker} - (Execution logic pending for this action type).")
 
@@ -390,8 +409,22 @@ def run_trading_cycle(ticker_to_potentially_trade): # RENAMED and parameter clar
                     quantity_for_action=quantity_for_action
                 )
             elif advised_action == "ADD":
-                # TODO: Implement ADD logic call to execute_trade_logic
-                print(f"Action ADD for {advised_symbol} - (Execution logic pending in run_trading_cycle).")
+                quantity_to_add = advice.get('quantity')
+                if isinstance(quantity_to_add, (int, float)) and quantity_to_add > 0:
+                    execute_trade_logic(
+                        api=alpaca_api,
+                        data_api=data_client,
+                        agent=trading_agent,
+                        ticker=advised_symbol,
+                        decision=None, # Not a new trade decision from this path
+                        conviction_score=0, # Agent might provide a new one for ADD, but mock doesn't yet
+                        equity=current_equity,
+                        position=current_alpaca_position_obj, # Pass existing position
+                        management_action="ADD",
+                        quantity_for_action=quantity_to_add
+                    )
+                else:
+                    print(f"Warning: Invalid or missing quantity for ADD action on {advised_symbol}. Skipping.")
             elif advised_action == "HOLD":
                 print(f"Agent advises HOLD for {advised_symbol}. No execution needed.")
             else:
@@ -441,26 +474,31 @@ def get_mocked_agent_portfolio_advice(detailed_open_positions, potential_new_tra
     new_trade_decision = None
 
     # Example logic for managing open positions (mocked)
-    for pos in detailed_open_positions:
-        # Simple mock: if P/L > 5%, suggest REDUCE, if P/L < -2%, suggest CLOSE, else HOLD
-        if pos['unrealized_pl_pct'] > 5.0:
-            management_actions.append({
-                'symbol': pos['symbol'],
-                'action': 'REDUCE',
-                'quantity': int(pos['qty'] * 0.1), # Suggest selling 10%
-                'reason': f"Mock: Profitable ({pos['unrealized_pl_pct']:.2f}%), suggesting partial profit taking."
+    for i, pos in enumerate(detailed_open_positions):
+        # Simple mock: cycle through actions for variety if multiple positions
+        action_type_index = i % 4 # Cycle through 0: HOLD, 1: REDUCE, 2: CLOSE, 3: ADD
+
+        if action_type_index == 1 and pos['unrealized_pl_pct'] > 1.0 : # Try to reduce if some profit
+             management_actions.append({
+                'symbol': pos['symbol'], 'action': 'REDUCE',
+                'quantity': max(1, int(pos['qty'] * 0.1)), # Sell 10% or at least 1 share
+                'reason': f"Mock: Profitable ({pos['unrealized_pl_pct']:.2f}%), suggest REDUCE."
             })
-        elif pos['unrealized_pl_pct'] < -2.0:
+        elif action_type_index == 2 and pos['unrealized_pl_pct'] < -1.0: # Try to close if some loss
             management_actions.append({
-                'symbol': pos['symbol'],
-                'action': 'CLOSE',
-                'reason': f"Mock: Losing ({pos['unrealized_pl_pct']:.2f}%), suggesting cut loss."
+                'symbol': pos['symbol'], 'action': 'CLOSE',
+                'reason': f"Mock: Losing ({pos['unrealized_pl_pct']:.2f}%), suggest CLOSE."
             })
-        else:
+        elif action_type_index == 3 and pos['unrealized_pl_pct'] > 0.5: # Try to add if slightly positive and it's its turn
             management_actions.append({
-                'symbol': pos['symbol'],
-                'action': 'HOLD',
-                'reason': f"Mock: Holding position ({pos['unrealized_pl_pct']:.2f}%)."
+                'symbol': pos['symbol'], 'action': 'ADD',
+                'quantity': max(1, int(pos['qty'] * 0.05)), # Add 5% or at least 1 share
+                'reason': f"Mock: Slightly positive ({pos['unrealized_pl_pct']:.2f}%) and conditions seem okay, suggest ADD."
+            })
+        else: # Default to HOLD or if conditions for other actions not met
+            management_actions.append({
+                'symbol': pos['symbol'], 'action': 'HOLD',
+                'reason': f"Mock: Defaulting to HOLD for {pos['symbol']} ({pos['unrealized_pl_pct']:.2f}%)."
             })
 
     # Example logic for new trade opportunity (mocked)
