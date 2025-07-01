@@ -10,7 +10,10 @@ from alpaca.data.timeframe import TimeFrame
 
 #os api method for now only
 # IMPORTANT: This MUST be a real OpenAI API key for embeddings to work.
-
+os.environ["OPENAI_API_KEY"] =
+os.environ["FINNHUB_API_KEY"] = "d0u99jhr01qn5fk3v8rgd0u99jhr01qn5fk3v8s0" # <--- You can also add your Finnhub key here
+# This is for OpenRouter chat models.
+os.environ["OPENROUTER_API_KEY"] =
 # --- Alpaca API Configuration ---
 # --- Alpaca API Configuration ---
 # WARNING: API keys are hardcoded below as per user request.
@@ -382,6 +385,11 @@ def run_trading_cycle(ticker_to_potentially_trade): # RENAMED and parameter clar
     print("\n--- Processing Management Actions ---")
     if agent_advice.get("position_management"):
         for advice in agent_advice["position_management"]:
+            # Add this check to validate the advice object
+            if not all(k in advice for k in ("symbol", "action")):
+                print(f"Warning: Skipping malformed advice object from LLM: {advice}")
+                continue
+
             log_msg_parts = [
                 f"Agent advises for {advice['symbol']}: Action: {advice['action']}"
             ]
