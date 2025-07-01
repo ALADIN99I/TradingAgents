@@ -385,6 +385,11 @@ def run_trading_cycle(ticker_to_potentially_trade): # RENAMED and parameter clar
     print("\n--- Processing Management Actions ---")
     if agent_advice.get("position_management"):
         for advice in agent_advice["position_management"]:
+            # Add this check to validate the advice object
+            if not all(k in advice for k in ("symbol", "action")):
+                print(f"Warning: Skipping malformed advice object from LLM: {advice}")
+                continue
+
             log_msg_parts = [
                 f"Agent advises for {advice['symbol']}: Action: {advice['action']}"
             ]
