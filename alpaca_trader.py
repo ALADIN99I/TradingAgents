@@ -168,6 +168,34 @@ def execute_trade_logic(api, agent, ticker, decision, equity, position): #PARAME
     except Exception as e:
         log.error(f"Error in trade logic for {ticker}: {e}")
 
+def test_buy_logic_simulation(api, ticker, equity):
+    #log import
+    import logging # Ensure log is available if not globally configured for this scope
+    log = logging.getLogger(__name__)
+    log.info(f"[SIMULATION] Testing BUY logic for {ticker} with equity {equity}")
+
+    try:
+        # 1. Get Price (as in execute_trade_logic)
+        barset = api.get_bars(ticker, '1Min', limit=1)
+        if barset and ticker in barset and barset[ticker]:
+            last_price = barset[ticker][0].c
+            log.info(f"[SIMULATION] Fetched last price: {last_price} for {ticker}")
+        else:
+            log.error(f"[SIMULATION] Could not get last price for {ticker}. No bar data found.")
+            return
+
+        # 2. Calculate Position Size (as in execute_trade_logic)
+        qty = calculate_position_size(equity, last_price)
+        log.info(f"[SIMULATION] Calculated position size: {qty} shares of {ticker}")
+
+        if qty > 0:
+            log.info(f"[SIMULATION] Would attempt to submit BUY order for {qty} shares of {ticker}.")
+            # IMPORTANT: Actual api.submit_order(...) is NOT called here
+        else:
+            log.info(f"[SIMULATION] Position size is 0 for {ticker}. No trade would be executed.")
+
+    except Exception as e:
+        log.error(f"[SIMULATION] Error during BUY logic simulation for {ticker}: {e}")
 
 def run_daily_trading_session(ticker_symbol):
     """Runs the full trading session for a given ticker."""
@@ -224,7 +252,13 @@ if __name__ == "__main__":
         print("Using placeholders will likely result in authentication errors with the Alpaca API.")
 
     if alpaca_api is not None: # Only run if API connection was successful
-        run_daily_trading_session(ticker_to_trade)
+        print("\n--- Running Simulated Buy Logic Test ---")
+        test_equity = 50000 # Example equity, adjust as needed
+        test_buy_logic_simulation(alpaca_api, ticker_to_trade, test_equity)
+        print("--- Simulated Buy Logic Test Complete ---\n")
+
+        # Decide whether to proceed with the actual trading session or comment out for testing
+        # run_daily_trading_session(ticker_to_trade)
     else:
         print("\nCannot start trading session: Alpaca API connection failed at initialization.")
 
