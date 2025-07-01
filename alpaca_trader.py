@@ -3,6 +3,7 @@ from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
 from datetime import datetime
 import os
+import time # Added import for time.sleep()
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
@@ -71,11 +72,11 @@ else:
 trading_agent = TradingAgentsGraph(debug=False, config=config)
 print("TradingAgentsGraph initialized.")
 
-def get_account_state(api, ticker):
-    """Gets account balance and any open position for a specific ticker."""
+def get_account_state(api): # Removed ticker parameter
+    """Gets account balance and a list of all open positions."""
     if api is None:
         print("Alpaca API not initialized. Cannot get account state.")
-        return 0.0, None
+        return 0.0, [] # Return empty list for positions
 
 
     equity = 0.00
@@ -87,20 +88,14 @@ def get_account_state(api, ticker):
         print(f"Error fetching account information: {e}")
         equity = 0.0 # Default to 0 if account info cannot be fetched
 
-    position = None
+    open_positions = []
     try:
-        position = api.get_position(ticker)
-    except tradeapi.rest.APIError as e:
-        if e.status_code == 404: # Position not found
-            position = None
-        else:
-            print(f"APIError getting position for {ticker}: {e}")
-            position = None # Treat as no position on other API errors
+        open_positions = api.list_positions()
     except Exception as e:
-        print(f"Error getting position for {ticker}: {e}")
-        position = None
+        print(f"Error fetching open positions: {e}")
+        open_positions = [] # Default to empty list on error
 
-    return equity, position
+    return equity, open_positions
 
 def calculate_position_size(equity, last_price, conviction_score):
     """
@@ -229,58 +224,77 @@ def test_buy_logic_simulation(data_api, ticker, equity, conviction_score): # PAR
     except Exception as e:
         log.error(f"[SIMULATION] Error during BUY logic simulation for {ticker}: {e}")
 
-def run_daily_trading_session(ticker_symbol):
-    """Runs the full trading session for a given ticker."""
+def run_trading_cycle(ticker_to_potentially_trade): # RENAMED and parameter clarified
+    """Runs a trading cycle: reviews open positions and considers new trades."""
     if alpaca_api is None or data_client is None: # check for data_client
-        print(f"Cannot run trading session for {ticker_symbol}: Alpaca API not connected.")
+        print(f"Cannot run trading cycle for {ticker_to_potentially_trade}: Alpaca API not connected.")
         return
 
-    print(f"\n--- Starting trading session for {ticker_symbol} on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---")
+    print(f"\n--- Starting trading cycle on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---")
 
-    # 1. Get State
-    current_equity, current_position = get_account_state(alpaca_api, ticker_symbol)
-    print(f"Current Equity: ${current_equity:.2f} | Position in {ticker_symbol}: {'Yes, qty: ' + str(current_position.qty) if current_position else 'No'}")
+    # 1. Get Overall Account State and Open Positions
+    current_equity, open_positions = get_account_state(alpaca_api)
+    print(f"Current Equity: ${current_equity:.2f}. Open Positions: {len(open_positions)}")
 
-    if current_equity <= 0 and current_position is None:
-        print(f"Equity is ${current_equity:.2f} and no position in {ticker_symbol}. Cannot make new trades.")
-        print("--- Trading session complete ---")
+    if current_equity <= 0 and not open_positions:
+        print(f"Equity is ${current_equity:.2f} and no open positions. Cannot make new trades.")
+        print("--- Trading cycle complete ---")
         return
 
-    # 2. Get Decision
+    # 2. Review Existing Open Positions
+    print("\n--- Reviewing Open Positions ---")
+    if not open_positions:
+        print("No open positions to review.")
+    else:
+        for position in open_positions:
+            print(f"Reviewing open position in {position.symbol}: {position.qty} shares @ avg entry ${position.avg_entry_price}")
+            # TODO: Placeholder for consulting TradingAgentsGraph for management decisions
+            # e.g., get_management_decision(position.symbol, position, current_equity)
+            # This would involve a new way to interact with trading_agent.propagate or a new method.
+            # For now, we just log. In a real scenario, might adjust stops, take profit, or close.
+            pass # Explicitly doing nothing for now beyond logging
+
+    # 3. Consider New Trades for `ticker_to_potentially_trade`
+    # This logic assumes `ticker_to_potentially_trade` is a specific ticker we're always watching for new entries.
+    print(f"\n--- Considering New Trade for {ticker_to_potentially_trade} ---")
     analysis_date_str = datetime.now().strftime("%Y-%m-%d")
-    print(f"Requesting trading decision for {ticker_symbol} for date: {analysis_date_str}...")
-    try:
-        # The propagate method in the example returns _, decision.
-        # UPDATED ASSUMPTION: now returns (decision, conviction_score)
-        # We are discarding the first element (state) if it's still returned, or adjusting if the signature changed.
-        # For now, assuming propagate returns: (state_or_similar, (decision, conviction_score)) or just (decision, conviction_score)
-        # Let's assume it returns (decision, conviction_score) directly for simplicity here.
-        # If it's nested, like (_, (decision, conviction_score)), this will need adjustment.
-        raw_output = trading_agent.propagate(ticker_symbol, analysis_date_str)
-        if isinstance(raw_output, tuple) and len(raw_output) == 2 and isinstance(raw_output[1], tuple) and len(raw_output[1]) == 2): # Check for (_, (decision, conviction_score))
-            _, (agent_decision, conviction_score) = raw_output
-        elif isinstance(raw_output, tuple) and len(raw_output) == 2: # Check for (decision, conviction_score)
-             agent_decision, conviction_score = raw_output
-        else:
-            # Fallback or error if the structure isn't as expected.
-            # For now, let's assume a default high conviction if structure is old, to prevent crashes, and log a warning.
-            # This part would need to be robustly handled based on actual TradingAgentsGraph output.
-            print(f"Warning: Unexpected output structure from trading_agent.propagate(): {raw_output}. Defaulting conviction.")
-            agent_decision = raw_output[1] if isinstance(raw_output, tuple) and len(raw_output) > 1 else "HOLD" # Default based on old structure
-            conviction_score = 0.0 # Default to no trade if structure is unknown or decision is HOLD
-            if agent_decision == "BUY" or agent_decision == "SELL":
-                conviction_score = 0.8 # Default to high conviction for BUY/SELL if score is missing
 
-        print(f"Agent Decision for {ticker_symbol}: {agent_decision} with Conviction: {conviction_score:.2f}")
-    except Exception as e:
-        print(f"Error getting decision from TradingAgentsGraph for {ticker_symbol}: {e}")
-        print("--- Trading session complete ---")
-        return
+    # Check if we already have a position in ticker_to_potentially_trade
+    is_already_open = any(p.symbol == ticker_to_potentially_trade for p in open_positions)
+    position_details_for_new_trade = next((p for p in open_positions if p.symbol == ticker_to_potentially_trade), None)
 
-    # 3. Execute
-    execute_trade_logic(alpaca_api, data_client, trading_agent, ticker_symbol, agent_decision, conviction_score, current_equity, current_position)
+    if is_already_open:
+        print(f"Already have an open position in {ticker_to_potentially_trade}. Skipping new trade consideration for it in this cycle.")
+        # In a more advanced system, even if open, the agent might decide to ADD to the position.
+        # For now, new trade logic is only for tickers not currently held or if specifically allowed.
+    else:
+        print(f"Requesting NEW trade decision for {ticker_to_potentially_trade} for date: {analysis_date_str}...")
+        try:
+            raw_output = trading_agent.propagate(ticker_to_potentially_trade, analysis_date_str)
+            if isinstance(raw_output, tuple) and len(raw_output) == 2 and isinstance(raw_output[1], tuple) and len(raw_output[1]) == 2):
+                _, (agent_decision, conviction_score) = raw_output
+            elif isinstance(raw_output, tuple) and len(raw_output) == 2:
+                 agent_decision, conviction_score = raw_output
+            else:
+                print(f"Warning: Unexpected output structure from trading_agent.propagate(): {raw_output}. Defaulting conviction.")
+                agent_decision = raw_output[1] if isinstance(raw_output, tuple) and len(raw_output) > 1 else "HOLD"
+                conviction_score = 0.0
+                if agent_decision in ["BUY", "SELL"]: conviction_score = 0.8
 
-    print(f"--- Trading session for {ticker_symbol} complete ---")
+            print(f"Agent Decision for NEW trade on {ticker_to_potentially_trade}: {agent_decision} with Conviction: {conviction_score:.2f}")
+
+            if agent_decision in ["BUY", "SELL"]:
+                # Pass None for position if opening a new one, or existing if somehow logic allows adding.
+                execute_trade_logic(alpaca_api, data_client, trading_agent, ticker_to_potentially_trade, agent_decision, conviction_score, current_equity, position_details_for_new_trade)
+            else:
+                print(f"Decision for {ticker_to_potentially_trade} is {agent_decision}. No new trade action taken.")
+
+        except Exception as e:
+            print(f"Error getting NEW trade decision from TradingAgentsGraph for {ticker_to_potentially_trade}: {e}")
+            # Not executing trade if decision fetching failed
+
+    print(f"\n--- Trading cycle complete for {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---")
+
 
 if __name__ == "__main__":
     # --- To run the script ---
@@ -310,7 +324,13 @@ if __name__ == "__main__":
         print("--- Simulated Buy Logic Test Complete ---\n")
 
         # When you run the actual session, you'll need to pass both clients
-        # run_daily_trading_session(ticker_to_trade)
+        # Continuous trading loop
+        while True:
+            print(f"\n{'='*20} Starting New Trading Cycle {'='*20}")
+            run_trading_cycle(ticker_to_trade) # RENAMED
+            sleep_duration = 15 * 60  # 15 minutes
+            print(f"Cycle complete. Sleeping for {sleep_duration / 60} minutes...")
+            time.sleep(sleep_duration)
     else:
         print("\nCannot start trading session: Alpaca API connection failed at initialization.")
 
