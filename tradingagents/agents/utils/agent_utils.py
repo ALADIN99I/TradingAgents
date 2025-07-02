@@ -499,9 +499,19 @@ class Toolkit:
                     if isinstance(parsed_output, dict) and "error" in parsed_output:
                         error_detail = parsed_output.get("error")
                         raise ValueError(f"API returned a JSON error: {error_detail}")
+                    # If it's JSON but not the error structure, it's likely valid data or an unknown JSON format.
                 except json.JSONDecodeError:
-                    # Not a JSON string, or malformed JSON that wasn't a clear text error - proceed
-                    pass
+                    # It's not JSON. Apply the new/modified heuristic for non-JSON strings.
+                    stripped_output = raw_interface_output.strip()
+                    if not (stripped_output.startswith('{') or stripped_output.startswith('[')):
+                        # It's a string that doesn't start like JSON.
+                        # Check if it's a short, potentially affirmative message or a longer, suspicious one.
+                        # Threshold can be adjusted. "Success" or "OK" are short.
+                        if len(stripped_output) > 20 and "success" not in stripped_output.lower() and "ok" not in stripped_output.lower():
+                            output_snippet = stripped_output[:200] + "..." if len(stripped_output) > 200 else stripped_output
+                            raise ValueError(f"Suspected generic non-JSON, non-affirmative string returned by interface: '{output_snippet}'")
+                    # If it's short or contains "success"/"ok", or starts with {/[, let it pass to be treated as content.
+                    pass # Let it be treated as successful content if it's not caught
 
             successful_data_string = raw_interface_output
             if not isinstance(successful_data_string, str):
@@ -587,9 +597,18 @@ class Toolkit:
                     if isinstance(parsed_output, dict) and "error" in parsed_output:
                         error_detail = parsed_output.get("error")
                         raise ValueError(f"API returned a JSON error: {error_detail}")
+                    # If it's JSON but not the error structure, it's likely valid data or an unknown JSON format.
                 except json.JSONDecodeError:
-                    # Not a JSON string, or malformed JSON that wasn't a clear text error - proceed
-                    pass
+                    # It's not JSON. Apply the new/modified heuristic for non-JSON strings.
+                    stripped_output = raw_interface_output.strip()
+                    if not (stripped_output.startswith('{') or stripped_output.startswith('[')):
+                        # It's a string that doesn't start like JSON.
+                        # Check if it's a short, potentially affirmative message or a longer, suspicious one.
+                        if len(stripped_output) > 20 and "success" not in stripped_output.lower() and "ok" not in stripped_output.lower():
+                            output_snippet = stripped_output[:200] + "..." if len(stripped_output) > 200 else stripped_output
+                            raise ValueError(f"Suspected generic non-JSON, non-affirmative string returned by interface: '{output_snippet}'")
+                    # If it's short or contains "success"/"ok", or starts with {/[, let it pass to be treated as content.
+                    pass # Let it be treated as successful content if it's not caught
 
             successful_data_string = raw_interface_output
             if not isinstance(successful_data_string, str):
