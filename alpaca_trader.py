@@ -492,42 +492,144 @@ def run_trading_cycle(ticker_to_potentially_trade): # RENAMED and parameter clar
         print("No management actions advised for open positions.")
 
     # 5. Process New Trade Opportunity (if any)
-    print(f"\n--- Considering New Trade Opportunity ---")
-    new_trade_opportunity = agent_advice.get("new_trade_opportunity")
-    if new_trade_opportunity:
-        nt_symbol = new_trade_opportunity['symbol']
-        nt_decision = new_trade_opportunity['decision']
-        nt_conviction = new_trade_opportunity['conviction_score']
-        nt_reason = new_trade_opportunity.get('reason', 'N/A')
+    # --- Considering New Trade Opportunity ---
+    print(f"\n--- Considering New Trade Opportunity for {ticker_to_potentially_trade} ---")
+    # The new_trade_decision should already be fetched from agent_advice or directly if agent_advice structure is different
+    new_trade_decision = agent_advice.get("new_trade_opportunity") # Assuming it's here from earlier logic
 
-        print(f"Agent suggests NEW trade: {nt_decision} {nt_symbol} with Conviction {nt_conviction:.2f}. Reason: {nt_reason}")
-
-        is_already_open = any(p['symbol'] == nt_symbol for p in detailed_open_positions)
-        # current_pos_for_new_trade_obj = next((p_obj for p_obj in open_positions if p_obj.symbol == nt_symbol), None) # Not strictly needed with new logic
-
-        if nt_decision == "BUY" and nt_conviction > 0.5:
-            if is_already_open:
-                # This is now handled by the management advice, so we can ignore the new trade signal
-                print(f"Agent advised a new BUY for {nt_symbol}, but a position is already open. Management advice should be used for ADD actions.")
-            else:
-                # Execute the new trade
-                print(f"Agent suggests NEW trade: {nt_decision} {nt_symbol} with Conviction {nt_conviction:.2f}. Reason: {nt_reason}")
-                print(f"Executing new {nt_decision} trade for {nt_symbol}.")
-                execute_trade_logic(alpaca_api, data_client, trading_agent, nt_symbol, nt_decision, nt_conviction, current_equity, None) # Pass None as position for new trade
-        elif nt_decision == "SELL" and nt_conviction > 0.5: # Assuming SELL here implies opening a new short position
-            if is_already_open:
-                # This logic might need refinement if shorting an already owned (long) asset is a strategy.
-                # For now, similar to BUY, if a position exists, management advice should handle it (e.g. CLOSE then SHORT).
-                print(f"Agent advised a new SELL (short) for {nt_symbol}, but a position is already open. Management advice should handle this.")
-            else:
-                print(f"Agent suggests NEW trade: {nt_decision} {nt_symbol} with Conviction {nt_conviction:.2f}. Reason: {nt_reason}")
-                print(f"Executing new {nt_decision} (short) trade for {nt_symbol}.")
-                execute_trade_logic(alpaca_api, data_client, trading_agent, nt_symbol, nt_decision, nt_conviction, current_equity, None) # Pass None for new short
-        else:
-            # Agent advised not to open a new position (e.g. HOLD or low conviction)
-            print(f"Agent advises no new high-conviction trade for {ticker_to_potentially_trade} (Decision: {nt_decision}, Conviction: {nt_conviction:.2f}).")
+    if not new_trade_decision or not new_trade_decision.get("symbol"): # Ensure new_trade_decision and symbol exist
+        print(f"No valid new trade decision available for {ticker_to_potentially_trade}.")
     else:
-        print(f"Agent advises no new high-conviction trade opportunities for {ticker_to_potentially_trade} in this cycle.")
+        decision = new_trade_decision.get("decision")
+        symbol = new_trade_decision.get("symbol") # Use symbol from the decision
+        conviction = new_trade_decision.get("conviction_score", 0) # Use conviction_score, default to 0
+        reason = new_trade_decision.get("reason", "No reason provided.")
+
+        # Ensure the symbol from the decision matches the ticker_to_potentially_trade if that's intended,
+        # or clarify if the agent can suggest trades for symbols other than ticker_to_potentially_trade.
+        # For now, proceeding with `symbol` from the agent's decision.
+        if symbol != ticker_to_potentially_trade:
+            print(f"Note: Agent provided new trade decision for {symbol}, while current cycle focuses on {ticker_to_potentially_trade}. Proceeding with {symbol}.")
+
+        if decision == "BUY" and symbol: # Check if symbol is not None or empty
+            print(f"Agent suggests NEW trade: {decision} {symbol} with Conviction {conviction:.2f}. Reason: {reason}")
+
+            existing_position_obj = None
+            try:
+                # Use alpaca_api (the tradeapi.REST instance) to get position
+                existing_position_obj = alpaca_api.get_position(symbol)
+            except tradeapi.rest.APIError as e: # Catch specific Alpaca APIError for "position does not exist"
+                if e.status_code == 404: # Not found
+                    pass # Position does not exist, existing_position_obj remains None
+                else:
+                    print(f"APIError when checking for existing position for {symbol}: {e}") # Log other API errors
+                    existing_position_obj = None # Treat as no position on other errors
+            except Exception as e:
+                print(f"Generic error when checking for existing position for {symbol}: {e}")
+                existing_position_obj = None # Treat as no position on other errors
+
+
+            if existing_position_obj:
+                # If position exists, treat the BUY as an ADD
+                print(f"Position for {symbol} already exists. Treating BUY signal as an ADD action.")
+                # We need the last price to calculate quantity for ADD.
+                last_price_for_add = None
+                try:
+                    request_params = StockBarsRequest(
+                                        symbol_or_symbols=[symbol],
+                                        timeframe=TimeFrame.Minute, # Or appropriate timeframe
+                                        limit=1)
+                    barset = data_client.get_stock_bars(request_params) # Use data_client
+                    if barset and barset[symbol]:
+                        last_price_for_add = barset[symbol][0].close
+                    else:
+                        print(f"Could not get last price for {symbol} to calculate ADD quantity. No action taken.")
+                except Exception as e:
+                    print(f"Error fetching price for {symbol} to calculate ADD quantity: {e}. No action taken.")
+
+                if last_price_for_add:
+                    # Use the calculate_position_size function for consistency in sizing,
+                    # even though it's an ADD. It takes conviction into account.
+                    # Or, if the agent provides a specific quantity for ADD, use that.
+                    # Assuming new BUY signal's conviction applies to the ADD.
+                    add_quantity = calculate_position_size(current_equity, last_price_for_add, conviction) # Corrected parameter order
+                    if add_quantity > 0:
+                        print(f"Calculated quantity to ADD for {symbol}: {add_quantity}")
+                        execute_trade_logic( # Call execute_trade_logic for ADD
+                            api=alpaca_api,
+                            data_api=data_client,
+                            agent=trading_agent, # Pass the agent
+                            ticker=symbol,
+                            decision=None, # Not a new BUY, it's a management action
+                            conviction_score=conviction, # Pass conviction for potential use in logic or logging
+                            equity=current_equity,
+                            position=existing_position_obj, # Pass the existing position object
+                            management_action="ADD",
+                            quantity_for_action=add_quantity
+                        )
+                    else:
+                        print(f"Calculated quantity to add for {symbol} is zero (Conviction: {conviction:.2f}, Price: {last_price_for_add}). No action taken.")
+                else:
+                    print(f"Cannot ADD to {symbol} as last price could not be fetched.")
+            else:
+                # If no position exists, execute it as a new BUY
+                print(f"Executing new BUY trade for {symbol}.")
+                # For a new BUY, pass None for 'position' and 'management_action'.
+                # 'decision' will be "BUY".
+                execute_trade_logic(
+                    api=alpaca_api,
+                    data_api=data_client,
+                    agent=trading_agent, # Pass the agent
+                    ticker=symbol,
+                    decision="BUY",
+                    conviction_score=conviction,
+                    equity=current_equity,
+                    position=None, # No existing position
+                    management_action=None # Not a management action on an existing position
+                    # quantity_for_action is not needed for a new BUY handled by calculate_position_size internally
+                )
+        # Handling for "SELL" (new short) can remain similar if that's intended
+        elif decision == "SELL" and symbol: # Check if symbol is not None or empty
+            print(f"Agent suggests NEW trade: {decision} {symbol} with Conviction {conviction:.2f}. Reason: {reason}")
+            # Check if a position in this symbol already exists (could be long or short)
+            existing_position_obj = None
+            try:
+                existing_position_obj = alpaca_api.get_position(symbol)
+            except tradeapi.rest.APIError as e:
+                if e.status_code == 404: pass
+                else: print(f"APIError checking position for new SELL {symbol}: {e}")
+            except Exception as e:
+                print(f"Error checking position for new SELL {symbol}: {e}")
+
+            if existing_position_obj:
+                # If a position already exists (e.g., it's long), a new "SELL" signal might mean
+                # "close the long and go short" or "reduce the long".
+                # This part of the logic might need more sophistication based on strategy.
+                # For now, let's assume if a position exists, management advice should have handled it.
+                # Or, if the agent explicitly says "SELL" for a new trade despite an existing one,
+                # it might imply a desire to flip or short against an existing long.
+                # This is complex. For simplicity, we'll print a message.
+                print(f"Agent suggests new SELL for {symbol}, but a position already exists. Current logic defers to position management for existing assets.")
+                # Potentially, one could trigger a CLOSE here, then a new SELL (short) if conviction is high.
+                # execute_trade_logic(..., management_action="CLOSE", ...)
+                # execute_trade_logic(..., decision="SELL", ...)
+            else:
+                # If no position exists, execute it as a new SELL (short)
+                print(f"Executing new SELL (short) trade for {symbol}.")
+                execute_trade_logic(
+                    api=alpaca_api,
+                    data_api=data_client,
+                    agent=trading_agent,
+                    ticker=symbol,
+                    decision="SELL",
+                    conviction_score=conviction,
+                    equity=current_equity,
+                    position=None, # No existing position
+                    management_action=None
+                )
+        else:
+            print(f"Agent advises no new high-conviction trade for {symbol if symbol else ticker_to_potentially_trade} (Decision: {decision}, Conviction: {conviction:.2f}).")
+
 
     print(f"\n--- Trading cycle complete for {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---")
 
