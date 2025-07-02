@@ -706,70 +706,67 @@ def get_stock_news_openai(ticker, curr_date):
     config = get_config()
     client = OpenAI(base_url=config["backend_url"])
 
-    response = client.responses.create(
-        model=config["quick_think_llm"],
-        input=[
-            {
-                "role": "system",
-                "content": [
-                    {
-                        "type": "input_text",
-                        "text": f"Can you search Social Media for {ticker} from 7 days before {curr_date} to {curr_date}? Make sure you only get the data posted during that period.",
-                    }
-                ],
-            }
-        ],
-        text={"format": {"type": "text"}},
-        reasoning={},
-        tools=[
-            {
-                "type": "web_search_preview",
-                "user_location": {"type": "approximate"},
-                "search_context_size": "low",
-            }
-        ],
-        temperature=1,
-        max_output_tokens=4096,
-        top_p=1,
-        store=True,
-    )
+    response_content = f"Error: Could not retrieve global news for {curr_date}." # Default error
 
-    # Check if the response from OpenAI client is already a string (could be an error message)
-    if isinstance(response, str):
-        return response  # Return the string error directly
-
-    # Proceed if response is an object with .output attribute
     try:
-        # The original path expected a list of outputs, then content within that.
-        # Based on typical OpenAI responses, it might be response.choices[0].message.content or similar.
-        # The previous log showed `response.output[1].content[0].text`. This structure is unusual for standard OpenAI SDKs.
-        # It might be specific to the `OpenAI(base_url=config["backend_url"])` client if it's a custom wrapper or non-standard API.
-        # Given the error "'str' object has no attribute 'output'", the most direct cause is `response` being a string.
-        # If `response` is a valid object but doesn't match `response.output[1].content[0].text`, that's a different issue.
-        # For now, addressing the case where `response` itself is the error string.
+        response = client.responses.create(
+            model=config["quick_think_llm"],
+            input=[
+                {
+                    "role": "system",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": f"Can you search global or macroeconomics news from 7 days before {curr_date} to {curr_date} that would be informative for trading purposes? Make sure you only get the data posted during that period.",
+                        }
+                    ],
+                }
+            ],
+            text={"format": {"type": "text"}},
+            reasoning={},
+            tools=[
+                {
+                    "type": "web_search_preview",
+                    "user_location": {"type": "approximate"},
+                    "search_context_size": "low",
+                }
+            ],
+            temperature=1,
+            max_output_tokens=4096,
+            top_p=1,
+            store=True,
+        )
 
-        # Assuming the structure `response.output[1].content[0].text` is correct when the API call succeeds with a complex object:
-        if hasattr(response, 'output') and \
-           isinstance(response.output, list) and len(response.output) > 1 and \
-           hasattr(response.output[1], 'content') and \
-           isinstance(response.output[1].content, list) and len(response.output[1].content) > 0 and \
-           hasattr(response.output[1].content[0], 'text'):
-            return response.output[1].content[0].text
-        elif hasattr(response, 'choices') and response.choices and hasattr(response.choices[0], 'message') and hasattr(response.choices[0].message, 'content'):
-             # Fallback for a more standard OpenAI response structure if the custom one fails
-            return response.choices[0].message.content
-        elif isinstance(getattr(response, 'text', None), str): # If response has a simple .text attribute
-            return response.text
-        else:
-            # If the response is an object but doesn't match expected structures, convert to string or raise error
-            # This might indicate an unexpected successful response format from the API
-            return f"Unexpected response structure from get_global_news_openai: {str(response)}"
+        # Primary check: if the response itself is a string, it's likely a direct error message from the API
+        if isinstance(response, str):
+            response_content = response
+        # Check for the expected successful structure (response.output[1].content[0].text)
+        elif (hasattr(response, 'output') and
+              isinstance(response.output, list) and len(response.output) > 1 and
+              response.output[1] and hasattr(response.output[1], 'content') and
+              isinstance(response.output[1].content, list) and len(response.output[1].content) > 0 and
+              response.output[1].content[0] and hasattr(response.output[1].content[0], 'text')):
+            response_content = response.output[1].content[0].text
+        # Fallback for a more standard OpenAI API structure (e.g. gpt-3.5-turbo like response.choices[0].message.content)
+        elif (hasattr(response, 'choices') and isinstance(response.choices, list) and
+              len(response.choices) > 0 and response.choices[0] and
+              hasattr(response.choices[0], 'message') and response.choices[0].message and
+              hasattr(response.choices[0].message, 'content') and
+              isinstance(response.choices[0].message.content, str)):
+            response_content = response.choices[0].message.content
+        # If response is an object but not the expected structure, and has a 'text' attribute that is a string
+        elif hasattr(response, 'text') and isinstance(response.text, str):
+            response_content = response.text
+        # If it's some other object type we don't recognize, convert to string
+        elif not isinstance(response, str): # This case implies it's an object but not one of the above
+            response_content = f"Unexpected OpenAI response object type: {type(response)}. Content: {str(response)}"
+        # If response was None or some other unhandled case, the default error_message will be used.
 
-    except AttributeError:
-        # This might happen if 'response' is an object but doesn't have the expected nested attributes.
-        return f"Error processing OpenAI response: Attribute error. Response: {str(response)}"
     except Exception as e:
-        return f"Unexpected error in get_global_news_openai processing: {str(e)}"
+        # Catch any other exception during the API call or processing
+        response_content = f"Exception in get_global_news_openai during API call/processing: {str(e)}"
+
+    return response_content
 
 
 def get_global_news_openai(curr_date):
