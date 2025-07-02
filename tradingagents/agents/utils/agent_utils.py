@@ -4,6 +4,7 @@ from typing import Annotated
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import RemoveMessage
 from langchain_core.tools import tool
+from langchain_core.messages import ToolMessage # Changed ToolOutput to ToolMessage
 from datetime import date, timedelta, datetime
 import functools
 import pandas as pd
@@ -63,7 +64,7 @@ class Toolkit:
         
         global_news_result = interface.get_reddit_global_news(curr_date, 7, 5)
 
-        return global_news_result
+        return ToolMessage(content=global_news_result, tool_call_id="get_reddit_news")
 
     @staticmethod
     @tool
@@ -95,7 +96,7 @@ class Toolkit:
             ticker, end_date_str, look_back_days
         )
 
-        return finnhub_news_result
+        return ToolMessage(content=finnhub_news_result, tool_call_id="get_finnhub_news")
 
     @staticmethod
     @tool
@@ -117,7 +118,7 @@ class Toolkit:
 
         stock_news_results = interface.get_reddit_company_news(ticker, curr_date, 7, 5)
 
-        return stock_news_results
+        return ToolMessage(content=stock_news_results, tool_call_id="get_reddit_stock_info")
 
     @staticmethod
     @tool
@@ -138,7 +139,7 @@ class Toolkit:
 
         result_data = interface.get_YFin_data(symbol, start_date, end_date)
 
-        return result_data
+        return ToolMessage(content=result_data, tool_call_id="get_YFin_data")
 
     @staticmethod
     @tool
@@ -159,7 +160,7 @@ class Toolkit:
 
         result_data = interface.get_YFin_data_online(symbol, start_date, end_date)
 
-        return result_data
+        return ToolMessage(content=result_data, tool_call_id="get_YFin_data_online")
 
     @staticmethod
     @tool
@@ -188,7 +189,7 @@ class Toolkit:
             symbol, indicator, curr_date, look_back_days, False
         )
 
-        return result_stockstats
+        return ToolMessage(content=result_stockstats, tool_call_id="get_stockstats_indicators_report")
 
     @staticmethod
     @tool
@@ -217,7 +218,7 @@ class Toolkit:
             symbol, indicator, curr_date, look_back_days, True
         )
 
-        return result_stockstats
+        return ToolMessage(content=result_stockstats, tool_call_id="get_stockstats_indicators_report_online")
 
     @staticmethod
     @tool
@@ -241,7 +242,7 @@ class Toolkit:
             ticker, curr_date, 30
         )
 
-        return data_sentiment
+        return ToolMessage(content=data_sentiment, tool_call_id="get_finnhub_company_insider_sentiment")
 
     @staticmethod
     @tool
@@ -265,7 +266,7 @@ class Toolkit:
             ticker, curr_date, 30
         )
 
-        return data_trans
+        return ToolMessage(content=data_trans, tool_call_id="get_finnhub_company_insider_transactions")
 
     @staticmethod
     @tool
@@ -289,7 +290,7 @@ class Toolkit:
 
         data_balance_sheet = interface.get_simfin_balance_sheet(ticker, freq, curr_date)
 
-        return data_balance_sheet
+        return ToolMessage(content=data_balance_sheet, tool_call_id="get_simfin_balance_sheet")
 
     @staticmethod
     @tool
@@ -313,7 +314,7 @@ class Toolkit:
 
         data_cashflow = interface.get_simfin_cashflow(ticker, freq, curr_date)
 
-        return data_cashflow
+        return ToolMessage(content=data_cashflow, tool_call_id="get_simfin_cashflow")
 
     @staticmethod
     @tool
@@ -339,7 +340,7 @@ class Toolkit:
             ticker, freq, curr_date
         )
 
-        return data_income_stmt
+        return ToolMessage(content=data_income_stmt, tool_call_id="get_simfin_income_stmt")
 
     @staticmethod
     @tool
@@ -359,7 +360,7 @@ class Toolkit:
 
         google_news_results = interface.get_google_news(query, curr_date, 7)
 
-        return google_news_results
+        return ToolMessage(content=google_news_results, tool_call_id="get_google_news")
 
     @staticmethod
     @tool
@@ -378,7 +379,7 @@ class Toolkit:
 
         openai_news_results = interface.get_stock_news_openai(ticker, curr_date)
 
-        return openai_news_results
+        return ToolMessage(content=openai_news_results, tool_call_id="get_stock_news_openai")
 
     @staticmethod
     @tool
@@ -395,7 +396,7 @@ class Toolkit:
 
         openai_news_results = interface.get_global_news_openai(curr_date)
 
-        return openai_news_results
+        return ToolMessage(content=openai_news_results, tool_call_id="get_global_news_openai")
 
     @staticmethod
     @tool
@@ -416,4 +417,4 @@ class Toolkit:
             ticker, curr_date
         )
 
-        return openai_fundamentals_results
+        return ToolMessage(content=openai_fundamentals_results, tool_call_id="get_fundamentals_openai")
