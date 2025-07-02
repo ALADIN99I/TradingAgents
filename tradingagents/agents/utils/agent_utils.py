@@ -14,6 +14,7 @@ import re # For the new (now removed by patch) parse_json_object, but good to ke
 from datetime import datetime, timedelta # For Finnhub date calculations
 # from chromadb.config import Settings # This was in the diff but seems unrelated to the core changes, likely a merge artifact. Keeping commented.
 from finnhub import Client as FinnhubClient # For Finnhub API
+from tradingagents.dataflows import interface # Import the interface module
 
 # Initialize Finnhub client
 # Ensure FINNHUB_API_KEY is set as an environment variable
