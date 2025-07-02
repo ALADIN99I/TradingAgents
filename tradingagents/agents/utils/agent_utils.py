@@ -9,6 +9,7 @@ from datetime import date, timedelta, datetime
 import functools
 import pandas as pd
 import os
+import json # Added for parsing potential JSON error messages
 from dateutil.relativedelta import relativedelta
 from langchain_openai import ChatOpenAI
 import tradingagents.dataflows.interface as interface
@@ -470,32 +471,44 @@ class Toolkit:
         ticker: Annotated[str, "the company's ticker"],
         curr_date: Annotated[str, "Current date in yyyy-mm-dd format"],
         tool_call_id: Annotated[str, "The ID of the tool call"] = "get_stock_news_openai_signature_fallback_id"
-    ) -> ToolMessage: # Added return type hint for consistency
+    ) -> ToolMessage:
         """
-        Retrieve the latest news about a given stock by using OpenAI's news API.
-        Args:
-            ticker (str): Ticker of a company. e.g. AAPL, TSM
-            curr_date (str): Current date in yyyy-mm-dd format
-            tool_call_id (str): The ID of the tool call, injected by the framework.
-        Returns:
-            ToolMessage: A ToolMessage object containing the news or an error message.
+        Fetches stock news from an external source and includes debugging prints.
         """
         tool_name = "get_stock_news_openai"
         effective_tool_call_id = tool_call_id if isinstance(tool_call_id, str) and tool_call_id else f"{tool_name}_runtime_missing_or_empty_id"
+
         try:
-            openai_news_results = interface.get_stock_news_openai(ticker, curr_date)
-            if not isinstance(openai_news_results, str):
-                openai_news_results = str(openai_news_results)
+            raw_interface_output = interface.get_stock_news_openai(ticker, curr_date)
+
+            if isinstance(raw_interface_output, str):
+                try:
+                    parsed_output = json.loads(raw_interface_output)
+                    if isinstance(parsed_output, dict) and "error" in parsed_output:
+                        error_detail = parsed_output.get("error")
+                        # Optionally log this detected error if a logging framework is in use
+                        # print(f"DEBUG: Detected JSON error in {tool_name}: {error_detail}")
+                        raise ValueError(f"API returned an error: {error_detail}")
+                except json.JSONDecodeError:
+                    # Not a JSON string, or malformed - proceed assuming it might be a direct success string
+                    pass
+
+            successful_data_string = raw_interface_output
+            if not isinstance(successful_data_string, str):
+                successful_data_string = str(successful_data_string)
+
             return ToolMessage(
-                content=openai_news_results,
                 name=tool_name,
-                tool_call_id=effective_tool_call_id
+                content=successful_data_string,
+                tool_call_id=effective_tool_call_id,
             )
         except Exception as e:
-            error_string = f"Error in {tool_name} for {ticker}: {e}"
+            error_content = f"Error in {tool_name} for {ticker} processing date {curr_date}: {e}"
+            # Optionally log this error if a logging framework is in use
+            # print(f"ERROR: Caught exception in {tool_name}: {error_content}\n")
             return ToolMessage(
-                content=error_string,
                 name=tool_name,
+                content=error_content,
                 tool_call_id=effective_tool_call_id,
                 is_error=True
             )
@@ -543,13 +556,29 @@ class Toolkit:
         """
         tool_name = "get_fundamentals_openai"
         effective_tool_call_id = tool_call_id if isinstance(tool_call_id, str) and tool_call_id else f"{tool_name}_runtime_missing_or_empty_id"
+
         try:
-            openai_fundamentals_results = interface.get_fundamentals_openai(
-                ticker, curr_date
-            )
-            if not isinstance(openai_fundamentals_results, str):
-                openai_fundamentals_results = str(openai_fundamentals_results)
-            return ToolMessage(content=openai_fundamentals_results, name=tool_name, tool_call_id=effective_tool_call_id)
+            raw_interface_output = interface.get_fundamentals_openai(ticker, curr_date)
+
+            if isinstance(raw_interface_output, str):
+                try:
+                    parsed_output = json.loads(raw_interface_output)
+                    if isinstance(parsed_output, dict) and "error" in parsed_output:
+                        error_detail = parsed_output.get("error")
+                        # Optionally log this detected error
+                        # print(f"DEBUG: Detected JSON error in {tool_name}: {error_detail}")
+                        raise ValueError(f"API returned an error: {error_detail}")
+                except json.JSONDecodeError:
+                    # Not a JSON string or malformed - proceed
+                    pass
+
+            successful_data_string = raw_interface_output
+            if not isinstance(successful_data_string, str):
+                successful_data_string = str(successful_data_string)
+
+            return ToolMessage(content=successful_data_string, name=tool_name, tool_call_id=effective_tool_call_id)
         except Exception as e:
-            error_string = f"Error in {tool_name} for {ticker}: {e}"
-            return ToolMessage(content=error_string, name=tool_name, tool_call_id=effective_tool_call_id, is_error=True)
+            error_content = f"Error in {tool_name} for {ticker} processing date {curr_date}: {e}"
+            # Optionally log this error
+            # print(f"ERROR: Caught exception in {tool_name}: {error_content}\n")
+            return ToolMessage(content=error_content, name=tool_name, tool_call_id=effective_tool_call_id, is_error=True)
