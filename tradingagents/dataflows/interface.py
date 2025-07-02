@@ -12,9 +12,83 @@ import os
 import pandas as pd
 from tqdm import tqdm
 import yfinance as yf
+import requests # Added for FinancialDatasets.ai
 from openai import OpenAI
 from .config import get_config, set_config, DATA_DIR
 
+# Constants for FinancialDatasets.ai
+FINANCIALDATASETS_BASE_URL = "https://api.financialdatasets.ai"
+FINANCIALDATASETS_API_KEY = os.getenv("FINANCIALDATASETS_API_KEY")
+
+def fetch_financialdatasets_news(ticker=None, start_date_str=None, end_date_str=None):
+    """
+    Fetches news from FinancialDatasets.ai.
+    For company news, provide a ticker. For global news, omit the ticker.
+    Dates should be in YYYY-MM-DD format.
+    """
+    if not FINANCIALDATASETS_API_KEY:
+        return "Error: FINANCIALDATASETS_API_KEY not set."
+
+    headers = {"X-API-KEY": FINANCIALDATASETS_API_KEY}
+    params = {}
+    if ticker:
+        params["ticker"] = ticker
+    if start_date_str:
+        params["from_date"] = start_date_str
+    if end_date_str:
+        params["to_date"] = end_date_str
+
+    url = f"{FINANCIALDATASETS_BASE_URL}/news"
+
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=10)
+        response.raise_for_status()  # Raise HTTPError for bad responses (4XX or 5XX)
+        return response.json()
+    except requests.exceptions.HTTPError as http_err:
+        return f"HTTP error occurred: {http_err} - Response: {response.text}"
+    except requests.exceptions.RequestException as req_err:
+        return f"Request error occurred: {req_err}"
+    except json.JSONDecodeError:
+        return f"Error decoding JSON response from {url}. Response: {response.text}"
+    except Exception as e:
+        return f"An unexpected error occurred in fetch_financialdatasets_news: {e}"
+
+def fetch_financialdatasets_statement(ticker, statement_type, period="quarterly", limit=4):
+    """
+    Fetches financial statements (income-statements, balance-sheets, cash-flow-statements)
+    from FinancialDatasets.ai.
+    """
+    if not FINANCIALDATASETS_API_KEY:
+        return "Error: FINANCIALDATASETS_API_KEY not set."
+    if not ticker:
+        return "Error: Ticker symbol is required for fetching financial statements."
+
+    valid_statement_types = ["income-statements", "balance-sheets", "cash-flow-statements"]
+    if statement_type not in valid_statement_types:
+        return f"Error: Invalid statement type '{statement_type}'. Must be one of {valid_statement_types}."
+
+    headers = {"X-API-KEY": FINANCIALDATASETS_API_KEY}
+    params = {
+        "ticker": ticker,
+        "period": period,
+        "limit": limit,
+    }
+    url = f"{FINANCIALDATASETS_BASE_URL}/financials/{statement_type}"
+
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=10)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.HTTPError as http_err:
+        return f"HTTP error occurred: {http_err} - Response: {response.text}"
+    except requests.exceptions.RequestException as req_err:
+        return f"Request error occurred: {req_err}"
+    except json.JSONDecodeError:
+        return f"Error decoding JSON response from {url}. Response: {response.text}"
+    except Exception as e:
+        return f"An unexpected error occurred in fetch_financialdatasets_statement: {e}"
+
+# --- Existing Finnhub (to be replaced/removed by agent_utils.py updates) and other functions below ---
 
 def get_finnhub_news(
     ticker: Annotated[
