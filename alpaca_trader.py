@@ -604,12 +604,15 @@ if __name__ == "__main__":
 
         # When you run the actual session, you'll need to pass both clients
         # Continuous trading loop
-        while True:
-            print(f"\n{'='*20} Starting New Trading Cycle {'='*20}")
-            run_trading_cycle(ticker_to_trade) # RENAMED
-            sleep_duration = 15 * 60  # 15 minutes
-            print(f"Cycle complete. Sleeping for {sleep_duration / 60} minutes...")
-            time.sleep(sleep_duration)
+        # while True: # Modified for single test run
+        print(f"\n{'='*20} Starting New Trading Cycle for Testing {'='*20}")
+        print(f"--- Test: About to call run_trading_cycle for {ticker_to_trade} ---")
+        run_trading_cycle(ticker_to_trade)
+        print(f"--- Test: run_trading_cycle for {ticker_to_trade} completed ---")
+        # sleep_duration = 15 * 60  # 15 minutes
+        # print(f"Cycle complete. Sleeping for {sleep_duration / 60} minutes...")
+        # time.sleep(sleep_duration)
+        print("Test run finished. Exiting.")
     else:
         print("\nCannot start trading session: Alpaca API connection failed at initialization.")
 
