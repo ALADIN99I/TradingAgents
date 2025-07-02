@@ -482,15 +482,25 @@ class Toolkit:
             raw_interface_output = interface.get_stock_news_openai(ticker, curr_date)
 
             if isinstance(raw_interface_output, str):
+                # Heuristic check for common non-JSON error patterns or HTML
+                lower_output = raw_interface_output.lower()
+                error_keywords = ["error", "failed", "invalid", "unavailable", "forbidden", "unauthorized", "limit exceeded", "not found", "service unavailable"]
+                html_tags = ["<html>", "<body>", "<head>", "<!doctype html"]
+
+                if any(keyword in lower_output for keyword in error_keywords) or \
+                   any(tag in lower_output for tag in html_tags):
+                    # Limit the length of the raw output in the error message
+                    output_snippet = raw_interface_output[:200] + "..." if len(raw_interface_output) > 200 else raw_interface_output
+                    raise ValueError(f"Suspected non-JSON error string returned by interface: '{output_snippet}'")
+
+                # Attempt to parse as JSON and check for known error structure (this comes after the heuristic check)
                 try:
                     parsed_output = json.loads(raw_interface_output)
                     if isinstance(parsed_output, dict) and "error" in parsed_output:
                         error_detail = parsed_output.get("error")
-                        # Optionally log this detected error if a logging framework is in use
-                        # print(f"DEBUG: Detected JSON error in {tool_name}: {error_detail}")
-                        raise ValueError(f"API returned an error: {error_detail}")
+                        raise ValueError(f"API returned a JSON error: {error_detail}")
                 except json.JSONDecodeError:
-                    # Not a JSON string, or malformed - proceed assuming it might be a direct success string
+                    # Not a JSON string, or malformed JSON that wasn't a clear text error - proceed
                     pass
 
             successful_data_string = raw_interface_output
@@ -561,15 +571,24 @@ class Toolkit:
             raw_interface_output = interface.get_fundamentals_openai(ticker, curr_date)
 
             if isinstance(raw_interface_output, str):
+                # Heuristic check for common non-JSON error patterns or HTML
+                lower_output = raw_interface_output.lower()
+                error_keywords = ["error", "failed", "invalid", "unavailable", "forbidden", "unauthorized", "limit exceeded", "not found", "service unavailable"]
+                html_tags = ["<html>", "<body>", "<head>", "<!doctype html"]
+
+                if any(keyword in lower_output for keyword in error_keywords) or \
+                   any(tag in lower_output for tag in html_tags):
+                    output_snippet = raw_interface_output[:200] + "..." if len(raw_interface_output) > 200 else raw_interface_output
+                    raise ValueError(f"Suspected non-JSON error string returned by interface: '{output_snippet}'")
+
+                # Attempt to parse as JSON and check for known error structure
                 try:
                     parsed_output = json.loads(raw_interface_output)
                     if isinstance(parsed_output, dict) and "error" in parsed_output:
                         error_detail = parsed_output.get("error")
-                        # Optionally log this detected error
-                        # print(f"DEBUG: Detected JSON error in {tool_name}: {error_detail}")
-                        raise ValueError(f"API returned an error: {error_detail}")
+                        raise ValueError(f"API returned a JSON error: {error_detail}")
                 except json.JSONDecodeError:
-                    # Not a JSON string or malformed - proceed
+                    # Not a JSON string, or malformed JSON that wasn't a clear text error - proceed
                     pass
 
             successful_data_string = raw_interface_output
