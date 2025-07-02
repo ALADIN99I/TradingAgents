@@ -1,6 +1,89 @@
 import functools
 import time
 import json
+import re # Added for regex operations
+
+
+def parse_json_decision(raw: str, company_name_for_fallback: str) -> dict:
+    """
+    Extracts and parses JSON decision from raw LLM output.
+    Provides a fallback if parsing or validation fails.
+    """
+    # Attempt to extract JSON object using regex; this is good for nested structures
+    # and handles cases where JSON might be embedded in other text.
+    # This regex finds the first complete JSON object.
+    match = re.search(r"\{(?:[^{}]|(?R))*\}", raw, re.DOTALL)
+    json_str_to_parse = ""
+
+    if match:
+        json_str_to_parse = match.group(0)
+    else:
+        # If regex fails, try a simpler approach: strip common markdown and find first/last brace
+        temp_str = raw.strip()
+        if temp_str.startswith("```json"): # Handle ```json
+            temp_str = temp_str[7:]
+        elif temp_str.startswith("```"): # Handle ```
+            temp_str = temp_str[3:]
+
+        if temp_str.endswith("```"):
+            temp_str = temp_str[:-3]
+        temp_str = temp_str.strip()
+
+        start_brace = temp_str.find('{')
+        end_brace = temp_str.rfind('}')
+        if start_brace != -1 and end_brace != -1 and end_brace > start_brace:
+            json_str_to_parse = temp_str[start_brace : end_brace+1]
+        else:
+            # Fallback to the stripped string if no clear JSON structure is found by braces
+            # This might be an already clean JSON or will fail parsing, caught by try-except below.
+            json_str_to_parse = temp_str
+
+    try:
+        if not json_str_to_parse.strip().startswith("{") or not json_str_to_parse.strip().endswith("}"):
+             # If after all attempts, it doesn't look like a JSON object string
+            raise json.JSONDecodeError("No valid JSON object found in LLM output", raw, 0)
+
+        data = json.loads(json_str_to_parse)
+
+        # Validate essential keys
+        if not isinstance(data, dict) or \
+           "action" not in data or \
+           "symbol" not in data:
+            raise json.JSONDecodeError(
+                f"Missing essential keys ('action', 'symbol') in parsed JSON. Parsed: {str(data)[:200]}",
+                json_str_to_parse, 0
+            )
+
+        # Ensure symbol is a string, using fallback if it's structured unexpectedly or missing
+        if not isinstance(data.get("symbol"), str) or not data.get("symbol"):
+            data["symbol"] = company_name_for_fallback
+
+        # Default conviction score for HOLD if missing
+        if data.get("action") == "HOLD" and "conviction_score" not in data:
+            data["conviction_score"] = 0.0
+
+        # Default conviction score for BUY/SELL if missing, and annotate reason
+        if data.get("action") in ["BUY", "SELL"] and "conviction_score" not in data:
+            data["conviction_score"] = 0.5  # Default to neutral
+            current_reason = data.get("reason", "")
+            default_reason_note = "(Conviction score defaulted as LLM did not provide it)"
+            data["reason"] = f"{current_reason} {default_reason_note}".strip() if current_reason else default_reason_note
+
+        # Ensure reason is present
+        if "reason" not in data:
+            data["reason"] = "Reason not provided by LLM."
+
+        return data
+
+    except json.JSONDecodeError as e:
+        # Using print for now as logging isn't set up in this scope
+        print(f"TRADER_NODE (parse_json_decision): Error parsing LLM JSON output: {e}. Attempted to parse: '{json_str_to_parse[:500]}...' Raw input: '{raw[:500]}...'")
+        return {
+            "action": "HOLD",
+            "symbol": company_name_for_fallback,
+            "conviction_score": 0.0,
+            "reason": f"Failed to parse LLM decision. Error: {e}. Raw LLM output snippet: {raw[:200]}..."
+        }
 
 
 def create_trader(llm, memory):
@@ -63,7 +146,7 @@ Your task:
 - Output your decision as a JSON object with the keys: "action" (string: "BUY", "SELL", or "HOLD"), "symbol" (string: the company ticker), "conviction_score" (float: 0.0-1.0, required if action is BUY/SELL), and "reason" (string: your brief justification).
 - Example for BUY: {{"action": "BUY", "symbol": "{company_name}", "conviction_score": 0.85, "reason": "Strong bullish signals and high conviction from risk assessment."}}
 - Example for HOLD: {{"action": "HOLD", "symbol": "{company_name}", "reason": "Market conditions are too uncertain despite some positive indicators."}}
-- IMPORTANT: Respond ONLY with the JSON object. Do not include any other explanatory text, pleasantries, or markdown formatting like ```json before or after the JSON object. Your entire response should be the raw JSON.
+- IMPORTANT: You MUST respond with JSON only. Do NOT include any additional text, commentary, or markdown formatting such as ```json before or after the JSON object. Your entire response must be the raw JSON object itself.
 Utilize lessons from past decisions: {past_memory_str}"""
             },
             {
@@ -73,57 +156,15 @@ Utilize lessons from past decisions: {past_memory_str}"""
         ]
 
         response = llm.invoke(messages)
-        llm_output_str = response.content.strip()
 
-        # Attempt to parse the LLM output as JSON
-        try:
-            # Robustly extract JSON part from the LLM response
-            # Find the first '{' and the last '}'
-            start_brace = llm_output_str.find('{')
-            end_brace = llm_output_str.rfind('}')
-
-            if start_brace != -1 and end_brace != -1 and end_brace > start_brace:
-                json_str_to_parse = llm_output_str[start_brace : end_brace+1]
-            else:
-                # If no braces found, or in wrong order, attempt to parse the whole thing
-                # (it might be a plain JSON string already, or it will fail)
-                json_str_to_parse = llm_output_str
-
-            trade_decision_data = json.loads(json_str_to_parse)
-
-            # Ensure it's a dictionary and has the essential keys
-            if not isinstance(trade_decision_data, dict) or \
-               "action" not in trade_decision_data or \
-               "symbol" not in trade_decision_data:
-                raise json.JSONDecodeError("Missing essential keys in parsed JSON output", json_str_to_parse, 0)
-
-            # Add a default conviction score if action is HOLD and score is missing
-            if trade_decision_data.get("action") == "HOLD" and "conviction_score" not in trade_decision_data:
-                trade_decision_data["conviction_score"] = 0.0
-            # Ensure conviction score is present for BUY/SELL
-            if trade_decision_data.get("action") in ["BUY", "SELL"] and "conviction_score" not in trade_decision_data:
-                 # Fallback if LLM forgets conviction score for BUY/SELL
-                trade_decision_data["conviction_score"] = 0.5 # Default to neutral if missing
-                if "reason" in trade_decision_data:
-                    trade_decision_data["reason"] += " (Conviction score defaulted as it was missing from LLM output)"
-                else:
-                    trade_decision_data["reason"] = "(Conviction score defaulted as it was missing from LLM output)"
-
-
-        except json.JSONDecodeError as e:
-            print(f"TRADER_NODE: Error parsing LLM JSON output: {e}. Raw output: '{llm_output_str}'")
-            # Fallback to a HOLD decision if JSON parsing fails
-            trade_decision_data = {
-                "action": "HOLD",
-                "symbol": company_name,
-                "conviction_score": 0.0,
-                "reason": f"Failed to parse LLM decision. LLM Raw Output: {llm_output_str}"
-            }
+        # Use the new helper function to parse the decision
+        # Pass company_name for fallback purposes within the parser
+        trade_decision_data = parse_json_decision(response.content, company_name)
 
         return {
-            "messages": [response], # Keep the original response for logging/history
-            "trader_investment_plan": trade_decision_data, # This will be the structured decision
-            "final_trade_decision": trade_decision_data, # Ensuring this key also holds the final decision
+            "messages": [response],
+            "trader_investment_plan": trade_decision_data,
+            "final_trade_decision": trade_decision_data,
             "sender": name,
         }
 
