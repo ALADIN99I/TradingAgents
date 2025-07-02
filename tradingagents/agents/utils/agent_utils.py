@@ -54,21 +54,37 @@ def create_msg_delete():
 
 
 class Toolkit:
-    _config = DEFAULT_CONFIG.copy()
+    _config = None  # Initialize class attribute as None
 
     @classmethod
-    def update_config(cls, config):
+    def _ensure_config_loaded(cls):
+        """Ensures the class-level config is loaded."""
+        if cls._config is None:
+            from tradingagents.default_config import DEFAULT_CONFIG as toolkit_default_config # Import locally
+            cls._config = toolkit_default_config.copy()
+
+    @classmethod
+    def update_config(cls, config_update: dict):
         """Update the class-level configuration."""
-        cls._config.update(config)
+        cls._ensure_config_loaded() # Ensure config is loaded before updating
+        cls._config.update(config_update)
 
     @property
-    def config(self):
-        """Access the configuration."""
-        return self._config
+    def config(self) -> dict:
+        """Access the shared class-level configuration."""
+        Toolkit._ensure_config_loaded() # Ensure config is loaded before accessing
+        return Toolkit._config
 
-    def __init__(self, config=None):
-        if config:
-            self.update_config(config)
+    def __init__(self, config: dict = None):
+        """
+        Initializes the Toolkit.
+        Ensures the shared class configuration is loaded.
+        If an initial 'config' is provided, it updates the shared class configuration.
+        """
+        Toolkit._ensure_config_loaded() # Ensure default config is loaded
+
+        if config is not None: # If an overriding config is passed to constructor
+            Toolkit.update_config(config) # Update the shared class config
 
     @staticmethod
     @tool
