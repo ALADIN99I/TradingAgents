@@ -1,6 +1,7 @@
 # TradingAgents/graph/trading_graph.py
 
 import os
+import time # Added for rate limiting delays
 from pathlib import Path
 import json
 from datetime import date # Ensure date is imported
@@ -509,11 +510,13 @@ Provide only the JSON output. Do not include any other explanatory text before o
         print(f"--- Generating Bullish Thesis for {symbol}... ---")
         bull_research = self._get_bull_thesis(symbol) # _get_base_research_context is called within this
         print(f"Bull research for {symbol} obtained.")
+        time.sleep(1) # Delay after LLM call
 
         # 2. Bear Agent’s bearish thesis
         print(f"--- Generating Bearish Thesis for {symbol}... ---")
         bear_research = self._get_bear_thesis(symbol) # _get_base_research_context is called within this
         print(f"Bear research for {symbol} obtained.")
+        time.sleep(1) # Delay after LLM call
 
         # 3. Trader Agent’s final verdict
         print(f"--- Trader Agent Deliberating on {symbol}... ---")
@@ -523,6 +526,7 @@ Provide only the JSON output. Do not include any other explanatory text before o
             bear_thesis=bear_research,
             portfolio_positions=detailed_open_positions
         )
+        # Note: No time.sleep() needed after the last LLM call in this sequence.
         print(f"Trader agent final decision for {symbol} obtained.")
 
         print("--- Multi-Agent Debate Concluded ---")
