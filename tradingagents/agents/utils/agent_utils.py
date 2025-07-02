@@ -10,12 +10,32 @@ import functools
 import pandas as pd
 import os
 import json # Added for parsing potential JSON error messages
-from dateutil.relativedelta import relativedelta
-from langchain_openai import ChatOpenAI
-import tradingagents.dataflows.interface as interface
-from tradingagents.default_config import DEFAULT_CONFIG
-from langchain_core.messages import HumanMessage
+import re # For the new (now removed by patch) parse_json_object, but good to keep if other regex ops are needed
+from datetime import datetime, timedelta # For Finnhub date calculations
+# from chromadb.config import Settings # This was in the diff but seems unrelated to the core changes, likely a merge artifact. Keeping commented.
+from finnhub import Client as FinnhubClient # For Finnhub API
 
+# Initialize Finnhub client
+# Ensure FINNHUB_API_KEY is set as an environment variable
+finnhub_api_key = os.getenv("FINNHUB_API_KEY")
+if not finnhub_api_key:
+    print("WARNING: FINNHUB_API_KEY environment variable not set. Finnhub-dependent tools may fail.")
+finnhub_client = FinnhubClient(api_key=finnhub_api_key)
+
+
+def ensure_not_plaintext_error(response, tool_name: str):
+    """Raise ValueError if response is a simple string error from Finnhub."""
+    if isinstance(response, str):
+        # Finnhub can return plain-text errors like "No data available..."
+        # or if the API key is invalid, it might also return a string error.
+        # This check assumes any unexpected string response is an error.
+        # More specific keyword checking could be added if certain string responses are valid.
+        raise ValueError(f"{tool_name}: Finnhub API returned a plain-text response, suspected error: {response[:200]}")
+
+
+# The @tool decorator and ToolMessage wrapping will be applied to the functions below
+# where they are defined as methods of the Toolkit class.
+# The functions provided in the patch are the new core logic for these methods.
 
 def create_msg_delete():
     def delete_messages(state):
@@ -34,21 +54,37 @@ def create_msg_delete():
 
 
 class Toolkit:
-    _config = DEFAULT_CONFIG.copy()
+    _config = None  # Initialize class attribute as None
 
     @classmethod
-    def update_config(cls, config):
+    def _ensure_config_loaded(cls):
+        """Ensures the class-level config is loaded."""
+        if cls._config is None:
+            from tradingagents.default_config import DEFAULT_CONFIG as toolkit_default_config # Import locally
+            cls._config = toolkit_default_config.copy()
+
+    @classmethod
+    def update_config(cls, config_update: dict):
         """Update the class-level configuration."""
-        cls._config.update(config)
+        cls._ensure_config_loaded() # Ensure config is loaded before updating
+        cls._config.update(config_update)
 
     @property
-    def config(self):
-        """Access the configuration."""
-        return self._config
+    def config(self) -> dict:
+        """Access the shared class-level configuration."""
+        Toolkit._ensure_config_loaded() # Ensure config is loaded before accessing
+        return Toolkit._config
 
-    def __init__(self, config=None):
-        if config:
-            self.update_config(config)
+    def __init__(self, config: dict = None):
+        """
+        Initializes the Toolkit.
+        Ensures the shared class configuration is loaded.
+        If an initial 'config' is provided, it updates the shared class configuration.
+        """
+        Toolkit._ensure_config_loaded() # Ensure default config is loaded
+
+        if config is not None: # If an overriding config is passed to constructor
+            Toolkit.update_config(config) # Update the shared class config
 
     @staticmethod
     @tool
@@ -473,49 +509,35 @@ class Toolkit:
         tool_call_id: Annotated[str, "The ID of the tool call"] = "get_stock_news_openai_signature_fallback_id"
     ) -> ToolMessage:
         """
-        Fetches stock news from an external source and includes debugging prints.
+        Fetch company news from Finnhub; handles Finnhub-specific errors.
+        Note: Tool name includes 'openai' for historical/compatibility reasons, but now uses Finnhub.
         """
         tool_name = "get_stock_news_openai"
         effective_tool_call_id = tool_call_id if isinstance(tool_call_id, str) and tool_call_id else f"{tool_name}_runtime_missing_or_empty_id"
 
         try:
-            raw_interface_output = interface.get_stock_news_openai(ticker, curr_date)
+            # Calculate date range for the last 7 days
+            to_date_obj = datetime.fromisoformat(curr_date.split('T')[0]) # Handle potential 'T' in date string
+            from_date_obj = to_date_obj - timedelta(days=7)
+            from_date_str = from_date_obj.date().isoformat()
+            to_date_str = to_date_obj.date().isoformat()
 
-            if isinstance(raw_interface_output, str):
-                # Heuristic check for common non-JSON error patterns or HTML
-                lower_output = raw_interface_output.lower()
-                error_keywords = ["error", "failed", "invalid", "unavailable", "forbidden", "unauthorized", "limit exceeded", "not found", "service unavailable"]
-                html_tags = ["<html>", "<body>", "<head>", "<!doctype html"]
+            raw_finnhub_output = finnhub_client.company_news(symbol=ticker, _from=from_date_str, to=to_date_str)
 
-                if any(keyword in lower_output for keyword in error_keywords) or \
-                   any(tag in lower_output for tag in html_tags):
-                    # Limit the length of the raw output in the error message
-                    output_snippet = raw_interface_output[:200] + "..." if len(raw_interface_output) > 200 else raw_interface_output
-                    raise ValueError(f"Suspected non-JSON error string returned by interface: '{output_snippet}'")
+            ensure_not_plaintext_error(raw_finnhub_output, tool_name) # Check for simple string errors first
 
-                # Attempt to parse as JSON and check for known error structure (this comes after the heuristic check)
-                try:
-                    parsed_output = json.loads(raw_interface_output)
-                    if isinstance(parsed_output, dict) and "error" in parsed_output:
-                        error_detail = parsed_output.get("error")
-                        raise ValueError(f"API returned a JSON error: {error_detail}")
-                    # If it's JSON but not the error structure, it's likely valid data or an unknown JSON format.
-                except json.JSONDecodeError:
-                    # It's not JSON. Apply the new/modified heuristic for non-JSON strings.
-                    stripped_output = raw_interface_output.strip()
-                    if not (stripped_output.startswith('{') or stripped_output.startswith('[')):
-                        # It's a string that doesn't start like JSON.
-                        # Check if it's a short, potentially affirmative message or a longer, suspicious one.
-                        # Threshold can be adjusted. "Success" or "OK" are short.
-                        if len(stripped_output) > 20 and "success" not in stripped_output.lower() and "ok" not in stripped_output.lower():
-                            output_snippet = stripped_output[:200] + "..." if len(stripped_output) > 200 else stripped_output
-                            raise ValueError(f"Suspected generic non-JSON, non-affirmative string returned by interface: '{output_snippet}'")
-                    # If it's short or contains "success"/"ok", or starts with {/[, let it pass to be treated as content.
-                    pass # Let it be treated as successful content if it's not caught
+            if isinstance(raw_finnhub_output, dict) and raw_finnhub_output.get("error"):
+                raise ValueError(f"{tool_name}: Finnhub API returned an error: {raw_finnhub_output['error']}")
 
-            successful_data_string = raw_interface_output
-            if not isinstance(successful_data_string, str):
-                successful_data_string = str(successful_data_string)
+            # Assuming successful output from finnhub_client.company_news is a list of news items (dicts)
+            # Convert the list of dicts to a JSON string for the ToolMessage content
+            # If raw_finnhub_output is None or not a list/dict, json.dumps might raise error or return "null"
+            # Add a check for None or empty list to return a more specific message.
+            if raw_finnhub_output is None or (isinstance(raw_finnhub_output, list) and not raw_finnhub_output):
+                successful_data_string = "No news found for the given period."
+            else:
+                successful_data_string = json.dumps(raw_finnhub_output)
+
 
             return ToolMessage(
                 name=tool_name,
@@ -524,8 +546,6 @@ class Toolkit:
             )
         except Exception as e:
             error_content = f"Error in {tool_name} for {ticker} processing date {curr_date}: {e}"
-            # Optionally log this error if a logging framework is in use
-            # print(f"ERROR: Caught exception in {tool_name}: {error_content}\n")
             return ToolMessage(
                 name=tool_name,
                 content=error_content,
@@ -550,10 +570,36 @@ class Toolkit:
         tool_name = "get_global_news_openai"
         effective_tool_call_id = tool_call_id if isinstance(tool_call_id, str) and tool_call_id else f"{tool_name}_runtime_missing_or_empty_id"
         try:
-            openai_news_results = interface.get_global_news_openai(curr_date)
-            if not isinstance(openai_news_results, str):
-                openai_news_results = str(openai_news_results)
-            return ToolMessage(content=openai_news_results, name=tool_name, tool_call_id=effective_tool_call_id)
+            # This tool, by its name, seems intended to use an OpenAI source, not Finnhub.
+            # The patch provided was specific to Finnhub-backed tools.
+            # It will retain its previous error handling structure which includes heuristics.
+            raw_interface_output = interface.get_global_news_openai(curr_date)
+
+            if isinstance(raw_interface_output, str):
+                # Heuristic check for common non-JSON error patterns or HTML
+                lower_output = raw_interface_output.lower()
+                error_keywords = ["error", "failed", "invalid", "unavailable", "forbidden", "unauthorized", "limit exceeded", "not found", "service unavailable"]
+                html_tags = ["<html>", "<body>", "<head>", "<!doctype html"]
+                if any(keyword in lower_output for keyword in error_keywords) or \
+                   any(tag in lower_output for tag in html_tags):
+                    output_snippet = raw_interface_output[:200] + "..." if len(raw_interface_output) > 200 else raw_interface_output
+                    raise ValueError(f"Suspected non-JSON/HTML error string returned by interface for {tool_name}: '{output_snippet}'")
+                try:
+                    parsed_output = json.loads(raw_interface_output)
+                    if isinstance(parsed_output, dict) and "error" in parsed_output:
+                        raise ValueError(f"API returned a JSON error for {tool_name}: {parsed_output.get('error')}")
+                except json.JSONDecodeError:
+                    stripped_output = raw_interface_output.strip()
+                    if not (stripped_output.startswith('{') or stripped_output.startswith('[')):
+                        if len(stripped_output) > 20 and "success" not in stripped_output.lower() and "ok" not in stripped_output.lower():
+                            output_snippet = stripped_output[:200] + "..." if len(stripped_output) > 200 else stripped_output
+                            raise ValueError(f"Suspected generic non-JSON, non-affirmative string for {tool_name}: '{output_snippet}'")
+                    pass # Let it be treated as successful content if it's not caught by heuristics
+
+            successful_data_string = raw_interface_output
+            if not isinstance(successful_data_string, str):
+                successful_data_string = str(successful_data_string)
+            return ToolMessage(content=successful_data_string, name=tool_name, tool_call_id=effective_tool_call_id)
         except Exception as e:
             error_string = f"Error in {tool_name} for date {curr_date}: {e}"
             return ToolMessage(content=error_string, name=tool_name, tool_call_id=effective_tool_call_id, is_error=True)
@@ -562,61 +608,30 @@ class Toolkit:
     @tool
     def get_fundamentals_openai( # type: ignore
         ticker: Annotated[str, "the company's ticker"],
-        curr_date: Annotated[str, "Current date in yyyy-mm-dd format"],
+        curr_date: Annotated[str, "Current date in yyyy-mm-dd format"], # curr_date is not used by finnhub_client.financials
         tool_call_id: Annotated[str, "The ID of the tool call"] = "get_fundamentals_openai_signature_fallback_id"
     ) -> ToolMessage:
         """
-        Retrieve the latest fundamental information about a given stock on a given date by using OpenAI's news API.
-        Args:
-            ticker (str): Ticker of a company. e.g. AAPL, TSM
-            curr_date (str): Current date in yyyy-mm-dd format
-            tool_call_id (str): The ID of the tool call, injected by the framework.
-        Returns:
-            ToolMessage: A ToolMessage object containing the fundamentals data or an error message.
+        Fetch company fundamentals (balance sheet) from Finnhub. Handles Finnhub-specific errors.
+        Note: Tool name includes 'openai' for historical/compatibility reasons, but now uses Finnhub.
         """
         tool_name = "get_fundamentals_openai"
         effective_tool_call_id = tool_call_id if isinstance(tool_call_id, str) and tool_call_id else f"{tool_name}_runtime_missing_or_empty_id"
 
         try:
-            raw_interface_output = interface.get_fundamentals_openai(ticker, curr_date)
+            raw_finnhub_output = finnhub_client.financials(symbol=ticker, statement="bs", freq="annual")
 
-            if isinstance(raw_interface_output, str):
-                # Heuristic check for common non-JSON error patterns or HTML
-                lower_output = raw_interface_output.lower()
-                error_keywords = ["error", "failed", "invalid", "unavailable", "forbidden", "unauthorized", "limit exceeded", "not found", "service unavailable"]
-                html_tags = ["<html>", "<body>", "<head>", "<!doctype html"]
+            ensure_not_plaintext_error(raw_finnhub_output, tool_name) # Check for simple string errors first
 
-                if any(keyword in lower_output for keyword in error_keywords) or \
-                   any(tag in lower_output for tag in html_tags):
-                    output_snippet = raw_interface_output[:200] + "..." if len(raw_interface_output) > 200 else raw_interface_output
-                    raise ValueError(f"Suspected non-JSON error string returned by interface: '{output_snippet}'")
+            if isinstance(raw_finnhub_output, dict) and raw_finnhub_output.get("error"):
+                raise ValueError(f"{tool_name}: Finnhub API returned an error: {raw_finnhub_output['error']}")
 
-                # Attempt to parse as JSON and check for known error structure
-                try:
-                    parsed_output = json.loads(raw_interface_output)
-                    if isinstance(parsed_output, dict) and "error" in parsed_output:
-                        error_detail = parsed_output.get("error")
-                        raise ValueError(f"API returned a JSON error: {error_detail}")
-                    # If it's JSON but not the error structure, it's likely valid data or an unknown JSON format.
-                except json.JSONDecodeError:
-                    # It's not JSON. Apply the new/modified heuristic for non-JSON strings.
-                    stripped_output = raw_interface_output.strip()
-                    if not (stripped_output.startswith('{') or stripped_output.startswith('[')):
-                        # It's a string that doesn't start like JSON.
-                        # Check if it's a short, potentially affirmative message or a longer, suspicious one.
-                        if len(stripped_output) > 20 and "success" not in stripped_output.lower() and "ok" not in stripped_output.lower():
-                            output_snippet = stripped_output[:200] + "..." if len(stripped_output) > 200 else stripped_output
-                            raise ValueError(f"Suspected generic non-JSON, non-affirmative string returned by interface: '{output_snippet}'")
-                    # If it's short or contains "success"/"ok", or starts with {/[, let it pass to be treated as content.
-                    pass # Let it be treated as successful content if it's not caught
+            if not raw_finnhub_output:
+                 raise ValueError(f"{tool_name}: No data returned from Finnhub for {ticker}.")
 
-            successful_data_string = raw_interface_output
-            if not isinstance(successful_data_string, str):
-                successful_data_string = str(successful_data_string)
+            successful_data_string = json.dumps(raw_finnhub_output)
 
             return ToolMessage(content=successful_data_string, name=tool_name, tool_call_id=effective_tool_call_id)
         except Exception as e:
-            error_content = f"Error in {tool_name} for {ticker} processing date {curr_date}: {e}"
-            # Optionally log this error
-            # print(f"ERROR: Caught exception in {tool_name}: {error_content}\n")
+            error_content = f"Error in {tool_name} for {ticker}: {e}"
             return ToolMessage(content=error_content, name=tool_name, tool_call_id=effective_tool_call_id, is_error=True)
