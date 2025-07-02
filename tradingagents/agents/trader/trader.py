@@ -63,6 +63,7 @@ Your task:
 - Output your decision as a JSON object with the keys: "action" (string: "BUY", "SELL", or "HOLD"), "symbol" (string: the company ticker), "conviction_score" (float: 0.0-1.0, required if action is BUY/SELL), and "reason" (string: your brief justification).
 - Example for BUY: {{"action": "BUY", "symbol": "{company_name}", "conviction_score": 0.85, "reason": "Strong bullish signals and high conviction from risk assessment."}}
 - Example for HOLD: {{"action": "HOLD", "symbol": "{company_name}", "reason": "Market conditions are too uncertain despite some positive indicators."}}
+- IMPORTANT: Respond ONLY with the JSON object. Do not include any other explanatory text, pleasantries, or markdown formatting like ```json before or after the JSON object. Your entire response should be the raw JSON.
 Utilize lessons from past decisions: {past_memory_str}"""
             },
             {
@@ -76,19 +77,25 @@ Utilize lessons from past decisions: {past_memory_str}"""
 
         # Attempt to parse the LLM output as JSON
         try:
-            # Basic cleaning for common LLM JSON output issues
-            if llm_output_str.startswith("```json"):
-                llm_output_str = llm_output_str[7:]
-            if llm_output_str.endswith("```"):
-                llm_output_str = llm_output_str[:-3]
-            llm_output_str = llm_output_str.strip()
+            # Robustly extract JSON part from the LLM response
+            # Find the first '{' and the last '}'
+            start_brace = llm_output_str.find('{')
+            end_brace = llm_output_str.rfind('}')
 
-            trade_decision_data = json.loads(llm_output_str)
+            if start_brace != -1 and end_brace != -1 and end_brace > start_brace:
+                json_str_to_parse = llm_output_str[start_brace : end_brace+1]
+            else:
+                # If no braces found, or in wrong order, attempt to parse the whole thing
+                # (it might be a plain JSON string already, or it will fail)
+                json_str_to_parse = llm_output_str
+
+            trade_decision_data = json.loads(json_str_to_parse)
+
             # Ensure it's a dictionary and has the essential keys
             if not isinstance(trade_decision_data, dict) or \
                "action" not in trade_decision_data or \
-               "symbol" not in trade_decision_data: # reason and conviction_score are also important
-                raise json.JSONDecodeError("Missing essential keys in LLM JSON output", llm_output_str, 0)
+               "symbol" not in trade_decision_data:
+                raise json.JSONDecodeError("Missing essential keys in parsed JSON output", json_str_to_parse, 0)
 
             # Add a default conviction score if action is HOLD and score is missing
             if trade_decision_data.get("action") == "HOLD" and "conviction_score" not in trade_decision_data:
