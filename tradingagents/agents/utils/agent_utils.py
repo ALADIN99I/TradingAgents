@@ -53,18 +53,25 @@ class Toolkit:
     @tool
     def get_reddit_news(
         curr_date: Annotated[str, "Date you want to get news for in yyyy-mm-dd format"],
-    ) -> str:
+        tool_call_id: Annotated[str, "The ID of the tool call"]
+    ) -> ToolMessage:
         """
         Retrieve global news from Reddit within a specified time frame.
         Args:
             curr_date (str): Date you want to get news for in yyyy-mm-dd format
+            tool_call_id (str): The ID of the tool call, injected by the framework.
         Returns:
-            str: A formatted dataframe containing the latest global news from Reddit in the specified time frame.
+            ToolMessage: A ToolMessage object containing the news or an error message.
         """
-        
-        global_news_result = interface.get_reddit_global_news(curr_date, 7, 5)
-
-        return ToolMessage(content=global_news_result, tool_call_id="get_reddit_news")
+        tool_name = "get_reddit_news"
+        try:
+            global_news_result = interface.get_reddit_global_news(curr_date, 7, 5)
+            if not isinstance(global_news_result, str):
+                global_news_result = str(global_news_result)
+            return ToolMessage(content=global_news_result, name=tool_name, tool_call_id=tool_call_id)
+        except Exception as e:
+            error_string = f"Error in {tool_name} for date {curr_date}: {e}"
+            return ToolMessage(content=error_string, name=tool_name, tool_call_id=tool_call_id, is_error=True)
 
     @staticmethod
     @tool
@@ -75,28 +82,34 @@ class Toolkit:
         ],
         start_date: Annotated[str, "Start date in yyyy-mm-dd format"],
         end_date: Annotated[str, "End date in yyyy-mm-dd format"],
-    ):
+        tool_call_id: Annotated[str, "The ID of the tool call"]
+    ) -> ToolMessage:
         """
         Retrieve the latest news about a given stock from Finnhub within a date range
         Args:
             ticker (str): Ticker of a company. e.g. AAPL, TSM
             start_date (str): Start date in yyyy-mm-dd format
             end_date (str): End date in yyyy-mm-dd format
+            tool_call_id (str): The ID of the tool call, injected by the framework.
         Returns:
-            str: A formatted dataframe containing news about the company within the date range from start_date to end_date
+            ToolMessage: A ToolMessage object containing the news or an error message.
         """
+        tool_name = "get_finnhub_news"
+        try:
+            end_date_str = end_date
+            parsed_end_date = datetime.strptime(end_date, "%Y-%m-%d")
+            parsed_start_date = datetime.strptime(start_date, "%Y-%m-%d")
+            look_back_days = (parsed_end_date - parsed_start_date).days
 
-        end_date_str = end_date
-
-        end_date = datetime.strptime(end_date, "%Y-%m-%d")
-        start_date = datetime.strptime(start_date, "%Y-%m-%d")
-        look_back_days = (end_date - start_date).days
-
-        finnhub_news_result = interface.get_finnhub_news(
-            ticker, end_date_str, look_back_days
-        )
-
-        return ToolMessage(content=finnhub_news_result, tool_call_id="get_finnhub_news")
+            finnhub_news_result = interface.get_finnhub_news(
+                ticker, end_date_str, look_back_days
+            )
+            if not isinstance(finnhub_news_result, str):
+                finnhub_news_result = str(finnhub_news_result)
+            return ToolMessage(content=finnhub_news_result, name=tool_name, tool_call_id=tool_call_id)
+        except Exception as e:
+            error_string = f"Error in {tool_name} for {ticker}: {e}"
+            return ToolMessage(content=error_string, name=tool_name, tool_call_id=tool_call_id, is_error=True)
 
     @staticmethod
     @tool
@@ -106,19 +119,26 @@ class Toolkit:
             "Ticker of a company. e.g. AAPL, TSM",
         ],
         curr_date: Annotated[str, "Current date you want to get news for"],
-    ) -> str:
+        tool_call_id: Annotated[str, "The ID of the tool call"]
+    ) -> ToolMessage:
         """
         Retrieve the latest news about a given stock from Reddit, given the current date.
         Args:
             ticker (str): Ticker of a company. e.g. AAPL, TSM
             curr_date (str): current date in yyyy-mm-dd format to get news for
+            tool_call_id (str): The ID of the tool call, injected by the framework.
         Returns:
-            str: A formatted dataframe containing the latest news about the company on the given date
+            ToolMessage: A ToolMessage object containing the news or an error message.
         """
-
-        stock_news_results = interface.get_reddit_company_news(ticker, curr_date, 7, 5)
-
-        return ToolMessage(content=stock_news_results, tool_call_id="get_reddit_stock_info")
+        tool_name = "get_reddit_stock_info"
+        try:
+            stock_news_results = interface.get_reddit_company_news(ticker, curr_date, 7, 5)
+            if not isinstance(stock_news_results, str):
+                stock_news_results = str(stock_news_results)
+            return ToolMessage(content=stock_news_results, name=tool_name, tool_call_id=tool_call_id)
+        except Exception as e:
+            error_string = f"Error in {tool_name} for {ticker}: {e}"
+            return ToolMessage(content=error_string, name=tool_name, tool_call_id=tool_call_id, is_error=True)
 
     @staticmethod
     @tool
@@ -126,20 +146,27 @@ class Toolkit:
         symbol: Annotated[str, "ticker symbol of the company"],
         start_date: Annotated[str, "Start date in yyyy-mm-dd format"],
         end_date: Annotated[str, "End date in yyyy-mm-dd format"],
-    ) -> str:
+        tool_call_id: Annotated[str, "The ID of the tool call"]
+    ) -> ToolMessage:
         """
         Retrieve the stock price data for a given ticker symbol from Yahoo Finance.
         Args:
             symbol (str): Ticker symbol of the company, e.g. AAPL, TSM
             start_date (str): Start date in yyyy-mm-dd format
             end_date (str): End date in yyyy-mm-dd format
+            tool_call_id (str): The ID of the tool call, injected by the framework.
         Returns:
-            str: A formatted dataframe containing the stock price data for the specified ticker symbol in the specified date range.
+            ToolMessage: A ToolMessage object containing the stock data or an error message.
         """
-
-        result_data = interface.get_YFin_data(symbol, start_date, end_date)
-
-        return ToolMessage(content=result_data, tool_call_id="get_YFin_data")
+        tool_name = "get_YFin_data"
+        try:
+            result_data = interface.get_YFin_data(symbol, start_date, end_date)
+            if not isinstance(result_data, str):
+                result_data = str(result_data)
+            return ToolMessage(content=result_data, name=tool_name, tool_call_id=tool_call_id)
+        except Exception as e:
+            error_string = f"Error in {tool_name} for {symbol}: {e}"
+            return ToolMessage(content=error_string, name=tool_name, tool_call_id=tool_call_id, is_error=True)
 
     @staticmethod
     @tool
@@ -147,20 +174,27 @@ class Toolkit:
         symbol: Annotated[str, "ticker symbol of the company"],
         start_date: Annotated[str, "Start date in yyyy-mm-dd format"],
         end_date: Annotated[str, "End date in yyyy-mm-dd format"],
-    ) -> str:
+        tool_call_id: Annotated[str, "The ID of the tool call"]
+    ) -> ToolMessage:
         """
         Retrieve the stock price data for a given ticker symbol from Yahoo Finance.
         Args:
             symbol (str): Ticker symbol of the company, e.g. AAPL, TSM
             start_date (str): Start date in yyyy-mm-dd format
             end_date (str): End date in yyyy-mm-dd format
+            tool_call_id (str): The ID of the tool call, injected by the framework.
         Returns:
-            str: A formatted dataframe containing the stock price data for the specified ticker symbol in the specified date range.
+            ToolMessage: A ToolMessage object containing the stock data or an error message.
         """
-
-        result_data = interface.get_YFin_data_online(symbol, start_date, end_date)
-
-        return ToolMessage(content=result_data, tool_call_id="get_YFin_data_online")
+        tool_name = "get_YFin_data_online"
+        try:
+            result_data = interface.get_YFin_data_online(symbol, start_date, end_date)
+            if not isinstance(result_data, str):
+                result_data = str(result_data)
+            return ToolMessage(content=result_data, name=tool_name, tool_call_id=tool_call_id)
+        except Exception as e:
+            error_string = f"Error in {tool_name} for {symbol}: {e}"
+            return ToolMessage(content=error_string, name=tool_name, tool_call_id=tool_call_id, is_error=True)
 
     @staticmethod
     @tool
@@ -173,7 +207,8 @@ class Toolkit:
             str, "The current trading date you are trading on, YYYY-mm-dd"
         ],
         look_back_days: Annotated[int, "how many days to look back"] = 30,
-    ) -> str:
+        tool_call_id: Annotated[str, "The ID of the tool call"] = ""
+    ) -> ToolMessage:
         """
         Retrieve stock stats indicators for a given ticker symbol and indicator.
         Args:
@@ -181,15 +216,21 @@ class Toolkit:
             indicator (str): Technical indicator to get the analysis and report of
             curr_date (str): The current trading date you are trading on, YYYY-mm-dd
             look_back_days (int): How many days to look back, default is 30
+            tool_call_id (str): The ID of the tool call, injected by the framework.
         Returns:
-            str: A formatted dataframe containing the stock stats indicators for the specified ticker symbol and indicator.
+            ToolMessage: A ToolMessage object containing the indicators report or an error message.
         """
-
-        result_stockstats = interface.get_stock_stats_indicators_window(
-            symbol, indicator, curr_date, look_back_days, False
-        )
-
-        return ToolMessage(content=result_stockstats, tool_call_id="get_stockstats_indicators_report")
+        tool_name = "get_stockstats_indicators_report"
+        try:
+            result_stockstats = interface.get_stock_stats_indicators_window(
+                symbol, indicator, curr_date, look_back_days, False
+            )
+            if not isinstance(result_stockstats, str):
+                result_stockstats = str(result_stockstats)
+            return ToolMessage(content=result_stockstats, name=tool_name, tool_call_id=tool_call_id)
+        except Exception as e:
+            error_string = f"Error in {tool_name} for {symbol}, indicator {indicator}: {e}"
+            return ToolMessage(content=error_string, name=tool_name, tool_call_id=tool_call_id, is_error=True)
 
     @staticmethod
     @tool
@@ -202,7 +243,8 @@ class Toolkit:
             str, "The current trading date you are trading on, YYYY-mm-dd"
         ],
         look_back_days: Annotated[int, "how many days to look back"] = 30,
-    ) -> str:
+        tool_call_id: Annotated[str, "The ID of the tool call"] = ""
+    ) -> ToolMessage:
         """
         Retrieve stock stats indicators for a given ticker symbol and indicator.
         Args:
@@ -210,15 +252,21 @@ class Toolkit:
             indicator (str): Technical indicator to get the analysis and report of
             curr_date (str): The current trading date you are trading on, YYYY-mm-dd
             look_back_days (int): How many days to look back, default is 30
+            tool_call_id (str): The ID of the tool call, injected by the framework.
         Returns:
-            str: A formatted dataframe containing the stock stats indicators for the specified ticker symbol and indicator.
+            ToolMessage: A ToolMessage object containing the indicators report or an error message.
         """
-
-        result_stockstats = interface.get_stock_stats_indicators_window(
-            symbol, indicator, curr_date, look_back_days, True
-        )
-
-        return ToolMessage(content=result_stockstats, tool_call_id="get_stockstats_indicators_report_online")
+        tool_name = "get_stockstats_indicators_report_online"
+        try:
+            result_stockstats = interface.get_stock_stats_indicators_window(
+                symbol, indicator, curr_date, look_back_days, True
+            )
+            if not isinstance(result_stockstats, str):
+                result_stockstats = str(result_stockstats)
+            return ToolMessage(content=result_stockstats, name=tool_name, tool_call_id=tool_call_id)
+        except Exception as e:
+            error_string = f"Error in {tool_name} for {symbol}, indicator {indicator}: {e}"
+            return ToolMessage(content=error_string, name=tool_name, tool_call_id=tool_call_id, is_error=True)
 
     @staticmethod
     @tool
@@ -228,21 +276,28 @@ class Toolkit:
             str,
             "current date of you are trading at, yyyy-mm-dd",
         ],
-    ):
+        tool_call_id: Annotated[str, "The ID of the tool call"]
+    ) -> ToolMessage:
         """
-        Retrieve insider sentiment information about a company (retrieved from public SEC information) for the past 30 days
+        Retrieve insider sentiment information about a company for the past 30 days
         Args:
             ticker (str): ticker symbol of the company
             curr_date (str): current date you are trading at, yyyy-mm-dd
+            tool_call_id (str): The ID of the tool call, injected by the framework.
         Returns:
-            str: a report of the sentiment in the past 30 days starting at curr_date
+            ToolMessage: A ToolMessage object containing the sentiment data or an error message.
         """
-
-        data_sentiment = interface.get_finnhub_company_insider_sentiment(
-            ticker, curr_date, 30
-        )
-
-        return ToolMessage(content=data_sentiment, tool_call_id="get_finnhub_company_insider_sentiment")
+        tool_name = "get_finnhub_company_insider_sentiment"
+        try:
+            data_sentiment = interface.get_finnhub_company_insider_sentiment(
+                ticker, curr_date, 30
+            )
+            if not isinstance(data_sentiment, str):
+                data_sentiment = str(data_sentiment)
+            return ToolMessage(content=data_sentiment, name=tool_name, tool_call_id=tool_call_id)
+        except Exception as e:
+            error_string = f"Error in {tool_name} for {ticker}: {e}"
+            return ToolMessage(content=error_string, name=tool_name, tool_call_id=tool_call_id, is_error=True)
 
     @staticmethod
     @tool
@@ -252,21 +307,28 @@ class Toolkit:
             str,
             "current date you are trading at, yyyy-mm-dd",
         ],
-    ):
+        tool_call_id: Annotated[str, "The ID of the tool call"]
+    ) -> ToolMessage:
         """
-        Retrieve insider transaction information about a company (retrieved from public SEC information) for the past 30 days
+        Retrieve insider transaction information about a company for the past 30 days
         Args:
             ticker (str): ticker symbol of the company
             curr_date (str): current date you are trading at, yyyy-mm-dd
+            tool_call_id (str): The ID of the tool call, injected by the framework.
         Returns:
-            str: a report of the company's insider transactions/trading information in the past 30 days
+            ToolMessage: A ToolMessage object containing the transaction data or an error message.
         """
-
-        data_trans = interface.get_finnhub_company_insider_transactions(
-            ticker, curr_date, 30
-        )
-
-        return ToolMessage(content=data_trans, tool_call_id="get_finnhub_company_insider_transactions")
+        tool_name = "get_finnhub_company_insider_transactions"
+        try:
+            data_trans = interface.get_finnhub_company_insider_transactions(
+                ticker, curr_date, 30
+            )
+            if not isinstance(data_trans, str):
+                data_trans = str(data_trans)
+            return ToolMessage(content=data_trans, name=tool_name, tool_call_id=tool_call_id)
+        except Exception as e:
+            error_string = f"Error in {tool_name} for {ticker}: {e}"
+            return ToolMessage(content=error_string, name=tool_name, tool_call_id=tool_call_id, is_error=True)
 
     @staticmethod
     @tool
@@ -277,20 +339,27 @@ class Toolkit:
             "reporting frequency of the company's financial history: annual/quarterly",
         ],
         curr_date: Annotated[str, "current date you are trading at, yyyy-mm-dd"],
-    ):
+        tool_call_id: Annotated[str, "The ID of the tool call"]
+    ) -> ToolMessage:
         """
         Retrieve the most recent balance sheet of a company
         Args:
             ticker (str): ticker symbol of the company
-            freq (str): reporting frequency of the company's financial history: annual / quarterly
-            curr_date (str): current date you are trading at, yyyy-mm-dd
+            freq (str): reporting frequency: annual / quarterly
+            curr_date (str): current date, yyyy-mm-dd
+            tool_call_id (str): The ID of the tool call, injected by the framework.
         Returns:
-            str: a report of the company's most recent balance sheet
+            ToolMessage: A ToolMessage object containing the balance sheet data or an error message.
         """
-
-        data_balance_sheet = interface.get_simfin_balance_sheet(ticker, freq, curr_date)
-
-        return ToolMessage(content=data_balance_sheet, tool_call_id="get_simfin_balance_sheet")
+        tool_name = "get_simfin_balance_sheet"
+        try:
+            data_balance_sheet = interface.get_simfin_balance_sheet(ticker, freq, curr_date)
+            if not isinstance(data_balance_sheet, str):
+                data_balance_sheet = str(data_balance_sheet)
+            return ToolMessage(content=data_balance_sheet, name=tool_name, tool_call_id=tool_call_id)
+        except Exception as e:
+            error_string = f"Error in {tool_name} for {ticker}, freq {freq}: {e}"
+            return ToolMessage(content=error_string, name=tool_name, tool_call_id=tool_call_id, is_error=True)
 
     @staticmethod
     @tool
@@ -301,20 +370,27 @@ class Toolkit:
             "reporting frequency of the company's financial history: annual/quarterly",
         ],
         curr_date: Annotated[str, "current date you are trading at, yyyy-mm-dd"],
-    ):
+        tool_call_id: Annotated[str, "The ID of the tool call"]
+    ) -> ToolMessage:
         """
         Retrieve the most recent cash flow statement of a company
         Args:
             ticker (str): ticker symbol of the company
-            freq (str): reporting frequency of the company's financial history: annual / quarterly
-            curr_date (str): current date you are trading at, yyyy-mm-dd
+            freq (str): reporting frequency: annual / quarterly
+            curr_date (str): current date, yyyy-mm-dd
+            tool_call_id (str): The ID of the tool call, injected by the framework.
         Returns:
-                str: a report of the company's most recent cash flow statement
+            ToolMessage: A ToolMessage object containing the cash flow data or an error message.
         """
-
-        data_cashflow = interface.get_simfin_cashflow(ticker, freq, curr_date)
-
-        return ToolMessage(content=data_cashflow, tool_call_id="get_simfin_cashflow")
+        tool_name = "get_simfin_cashflow"
+        try:
+            data_cashflow = interface.get_simfin_cashflow(ticker, freq, curr_date)
+            if not isinstance(data_cashflow, str):
+                data_cashflow = str(data_cashflow)
+            return ToolMessage(content=data_cashflow, name=tool_name, tool_call_id=tool_call_id)
+        except Exception as e:
+            error_string = f"Error in {tool_name} for {ticker}, freq {freq}: {e}"
+            return ToolMessage(content=error_string, name=tool_name, tool_call_id=tool_call_id, is_error=True)
 
     @staticmethod
     @tool
@@ -325,96 +401,144 @@ class Toolkit:
             "reporting frequency of the company's financial history: annual/quarterly",
         ],
         curr_date: Annotated[str, "current date you are trading at, yyyy-mm-dd"],
-    ):
+        tool_call_id: Annotated[str, "The ID of the tool call"]
+    ) -> ToolMessage:
         """
         Retrieve the most recent income statement of a company
         Args:
             ticker (str): ticker symbol of the company
-            freq (str): reporting frequency of the company's financial history: annual / quarterly
-            curr_date (str): current date you are trading at, yyyy-mm-dd
+            freq (str): reporting frequency: annual / quarterly
+            curr_date (str): current date, yyyy-mm-dd
+            tool_call_id (str): The ID of the tool call, injected by the framework.
         Returns:
-                str: a report of the company's most recent income statement
+            ToolMessage: A ToolMessage object containing the income statement data or an error message.
         """
-
-        data_income_stmt = interface.get_simfin_income_statements(
-            ticker, freq, curr_date
-        )
-
-        return ToolMessage(content=data_income_stmt, tool_call_id="get_simfin_income_stmt")
+        tool_name = "get_simfin_income_stmt"
+        try:
+            data_income_stmt = interface.get_simfin_income_statements(
+                ticker, freq, curr_date
+            )
+            if not isinstance(data_income_stmt, str):
+                data_income_stmt = str(data_income_stmt)
+            return ToolMessage(content=data_income_stmt, name=tool_name, tool_call_id=tool_call_id)
+        except Exception as e:
+            error_string = f"Error in {tool_name} for {ticker}, freq {freq}: {e}"
+            return ToolMessage(content=error_string, name=tool_name, tool_call_id=tool_call_id, is_error=True)
 
     @staticmethod
     @tool
     def get_google_news(
         query: Annotated[str, "Query to search with"],
         curr_date: Annotated[str, "Curr date in yyyy-mm-dd format"],
-    ):
+        tool_call_id: Annotated[str, "The ID of the tool call"]
+    ) -> ToolMessage:
         """
         Retrieve the latest news from Google News based on a query and date range.
         Args:
             query (str): Query to search with
             curr_date (str): Current date in yyyy-mm-dd format
-            look_back_days (int): How many days to look back
+            tool_call_id (str): The ID of the tool call, injected by the framework.
         Returns:
-            str: A formatted string containing the latest news from Google News based on the query and date range.
+            ToolMessage: A ToolMessage object containing the news or an error message.
         """
-
-        google_news_results = interface.get_google_news(query, curr_date, 7)
-
-        return ToolMessage(content=google_news_results, tool_call_id="get_google_news")
+        tool_name = "get_google_news"
+        try:
+            google_news_results = interface.get_google_news(query, curr_date, 7)
+            if not isinstance(google_news_results, str):
+                google_news_results = str(google_news_results)
+            return ToolMessage(content=google_news_results, name=tool_name, tool_call_id=tool_call_id)
+        except Exception as e:
+            error_string = f"Error in {tool_name} for query '{query}': {e}"
+            return ToolMessage(content=error_string, name=tool_name, tool_call_id=tool_call_id, is_error=True)
 
     @staticmethod
     @tool
     def get_stock_news_openai(
         ticker: Annotated[str, "the company's ticker"],
         curr_date: Annotated[str, "Current date in yyyy-mm-dd format"],
+        tool_call_id: Annotated[str, "The ID of the tool call"]
     ):
         """
         Retrieve the latest news about a given stock by using OpenAI's news API.
         Args:
             ticker (str): Ticker of a company. e.g. AAPL, TSM
             curr_date (str): Current date in yyyy-mm-dd format
+            tool_call_id (str): The ID of the tool call, injected by the framework.
         Returns:
-            str: A formatted string containing the latest news about the company on the given date.
+            ToolMessage: A ToolMessage object containing the news or an error message.
         """
+        tool_name = "get_stock_news_openai" # It's good practice to define the tool name
+        try:
+            openai_news_results = interface.get_stock_news_openai(ticker, curr_date)
+            # Ensure openai_news_results is a string, not another ToolMessage or complex object
+            if not isinstance(openai_news_results, str):
+                # Attempt to serialize or get a string representation if it's not a simple string
+                # This depends on what interface.get_stock_news_openai actually returns
+                # For now, let's assume it should be a string. If it's complex, this needs adjustment.
+                openai_news_results = str(openai_news_results)
 
-        openai_news_results = interface.get_stock_news_openai(ticker, curr_date)
-
-        return ToolMessage(content=openai_news_results, tool_call_id="get_stock_news_openai")
+            return ToolMessage(
+                content=openai_news_results,
+                name=tool_name,
+                tool_call_id=tool_call_id
+            )
+        except Exception as e:
+            error_string = f"Error in {tool_name} for {ticker}: {e}"
+            return ToolMessage(
+                content=error_string,
+                name=tool_name,
+                tool_call_id=tool_call_id,
+                is_error=True # Optional: some frameworks might use this
+            )
 
     @staticmethod
     @tool
     def get_global_news_openai(
         curr_date: Annotated[str, "Current date in yyyy-mm-dd format"],
-    ):
+        tool_call_id: Annotated[str, "The ID of the tool call"]
+    ) -> ToolMessage:
         """
         Retrieve the latest macroeconomics news on a given date using OpenAI's macroeconomics news API.
         Args:
             curr_date (str): Current date in yyyy-mm-dd format
+            tool_call_id (str): The ID of the tool call, injected by the framework.
         Returns:
-            str: A formatted string containing the latest macroeconomic news on the given date.
+            ToolMessage: A ToolMessage object containing the news or an error message.
         """
-
-        openai_news_results = interface.get_global_news_openai(curr_date)
-
-        return ToolMessage(content=openai_news_results, tool_call_id="get_global_news_openai")
+        tool_name = "get_global_news_openai"
+        try:
+            openai_news_results = interface.get_global_news_openai(curr_date)
+            if not isinstance(openai_news_results, str):
+                openai_news_results = str(openai_news_results)
+            return ToolMessage(content=openai_news_results, name=tool_name, tool_call_id=tool_call_id)
+        except Exception as e:
+            error_string = f"Error in {tool_name} for date {curr_date}: {e}"
+            return ToolMessage(content=error_string, name=tool_name, tool_call_id=tool_call_id, is_error=True)
 
     @staticmethod
     @tool
     def get_fundamentals_openai(
         ticker: Annotated[str, "the company's ticker"],
         curr_date: Annotated[str, "Current date in yyyy-mm-dd format"],
-    ):
+        tool_call_id: Annotated[str, "The ID of the tool call"]
+    ) -> ToolMessage:
         """
         Retrieve the latest fundamental information about a given stock on a given date by using OpenAI's news API.
         Args:
             ticker (str): Ticker of a company. e.g. AAPL, TSM
             curr_date (str): Current date in yyyy-mm-dd format
+            tool_call_id (str): The ID of the tool call, injected by the framework.
         Returns:
-            str: A formatted string containing the latest fundamental information about the company on the given date.
+            ToolMessage: A ToolMessage object containing the fundamentals data or an error message.
         """
-
-        openai_fundamentals_results = interface.get_fundamentals_openai(
-            ticker, curr_date
-        )
-
-        return ToolMessage(content=openai_fundamentals_results, tool_call_id="get_fundamentals_openai")
+        tool_name = "get_fundamentals_openai"
+        try:
+            openai_fundamentals_results = interface.get_fundamentals_openai(
+                ticker, curr_date
+            )
+            if not isinstance(openai_fundamentals_results, str):
+                openai_fundamentals_results = str(openai_fundamentals_results)
+            return ToolMessage(content=openai_fundamentals_results, name=tool_name, tool_call_id=tool_call_id)
+        except Exception as e:
+            error_string = f"Error in {tool_name} for {ticker}: {e}"
+            return ToolMessage(content=error_string, name=tool_name, tool_call_id=tool_call_id, is_error=True)
