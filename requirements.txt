@@ -9,6 +9,7 @@ stockstats
 eodhd
 langgraph
 chromadb
+langchain-chroma
 setuptools
 backtrader
 akshare
@@ -26,3 +27,4 @@ langchain_anthropic
 langchain-google-genai
 alpaca-trade-api
 alpaca-py
+langchain-chroma>=0.2.0

@@ -15,6 +15,8 @@ import yfinance as yf
 import requests # Added for FinancialDatasets.ai
 from openai import OpenAI
 from .config import get_config, set_config, DATA_DIR
+from pathlib import Path
+import logging
 
 # Constants for FinancialDatasets.ai
 FINANCIALDATASETS_BASE_URL = "https://api.financialdatasets.ai"
@@ -269,7 +271,18 @@ def get_simfin_balance_sheet(
         "us",
         f"us-balance-{freq}.csv",
     )
-    df = pd.read_csv(data_path, sep=";")
+    try:
+        # 🎯 FIX: Sanitize and resolve the path at the point of use.
+        sanitized_path_str = str(data_path).strip()
+        resolved_path = Path(sanitized_path_str).resolve(strict=True)
+        logging.info(f"get_simfin_balance_sheet: Successfully resolved path {resolved_path}")
+        df = pd.read_csv(resolved_path, sep=";")
+    except FileNotFoundError:
+        logging.error(f"get_simfin_balance_sheet: File not found at path: {data_path} (sanitized: {sanitized_path_str})")
+        return "Balance sheet data file not found."
+    except Exception as e:
+        logging.error(f"get_simfin_balance_sheet: Error processing file '{data_path}': {e}")
+        return f"An error occurred while reading balance sheet data: {e}"
 
     # Convert date strings to datetime objects and remove any time components
     df["Report Date"] = pd.to_datetime(df["Report Date"], utc=True).dt.normalize()
@@ -316,7 +329,18 @@ def get_simfin_cashflow(
         "us",
         f"us-cashflow-{freq}.csv",
     )
-    df = pd.read_csv(data_path, sep=";")
+    try:
+        # 🎯 FIX: Sanitize and resolve the path at the point of use.
+        sanitized_path_str = str(data_path).strip()
+        resolved_path = Path(sanitized_path_str).resolve(strict=True)
+        logging.info(f"get_simfin_cashflow: Successfully resolved path {resolved_path}")
+        df = pd.read_csv(resolved_path, sep=";")
+    except FileNotFoundError:
+        logging.error(f"get_simfin_cashflow: File not found at path: {data_path} (sanitized: {sanitized_path_str})")
+        return "Cashflow data file not found."
+    except Exception as e:
+        logging.error(f"get_simfin_cashflow: Error processing file '{data_path}': {e}")
+        return f"An error occurred while reading cashflow data: {e}"
 
     # Convert date strings to datetime objects and remove any time components
     df["Report Date"] = pd.to_datetime(df["Report Date"], utc=True).dt.normalize()
@@ -363,7 +387,18 @@ def get_simfin_income_statements(
         "us",
         f"us-income-{freq}.csv",
     )
-    df = pd.read_csv(data_path, sep=";")
+    try:
+        # 🎯 FIX: Sanitize and resolve the path at the point of use.
+        sanitized_path_str = str(data_path).strip()
+        resolved_path = Path(sanitized_path_str).resolve(strict=True)
+        logging.info(f"get_simfin_income_statements: Successfully resolved path {resolved_path}")
+        df = pd.read_csv(resolved_path, sep=";")
+    except FileNotFoundError:
+        logging.error(f"get_simfin_income_statements: File not found at path: {data_path} (sanitized: {sanitized_path_str})")
+        return "Income statement data file not found."
+    except Exception as e:
+        logging.error(f"get_simfin_income_statements: Error processing file '{data_path}': {e}")
+        return f"An error occurred while reading income statement data: {e}"
 
     # Convert date strings to datetime objects and remove any time components
     df["Report Date"] = pd.to_datetime(df["Report Date"], utc=True).dt.normalize()
