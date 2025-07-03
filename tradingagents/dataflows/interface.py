@@ -61,10 +61,11 @@ def fetch_financialdatasets_news(ticker=None, start_date_str=None, end_date_str=
     For company news, provide a ticker. For global news, omit the ticker.
     Dates should be in YYYY-MM-DD format.
     """
-    if not FINANCIALDATASETS_API_KEY:
+    api_key = os.getenv("FINANCIALDATASETS_API_KEY")
+    if not api_key:
         return "Error: FINANCIALDATASETS_API_KEY not set."
 
-    headers = {"X-API-KEY": FINANCIALDATASETS_API_KEY}
+    headers = {"X-API-KEY": api_key}
     params = {}
     if ticker:
         params["ticker"] = ticker
@@ -93,7 +94,8 @@ def fetch_financialdatasets_statement(ticker, statement_type, period="quarterly"
     Fetches financial statements (income-statements, balance-sheets, cash-flow-statements)
     from FinancialDatasets.ai.
     """
-    if not FINANCIALDATASETS_API_KEY:
+    api_key = os.getenv("FINANCIALDATASETS_API_KEY")
+    if not api_key:
         return "Error: FINANCIALDATASETS_API_KEY not set."
     if not ticker:
         return "Error: Ticker symbol is required for fetching financial statements."
@@ -102,7 +104,7 @@ def fetch_financialdatasets_statement(ticker, statement_type, period="quarterly"
     if statement_type not in valid_statement_types:
         return f"Error: Invalid statement type '{statement_type}'. Must be one of {valid_statement_types}."
 
-    headers = {"X-API-KEY": FINANCIALDATASETS_API_KEY}
+    headers = {"X-API-KEY": api_key}
     params = {
         "ticker": ticker,
         "period": period,
