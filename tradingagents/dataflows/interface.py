@@ -18,7 +18,42 @@ from .config import get_config, set_config, DATA_DIR
 
 # Constants for FinancialDatasets.ai
 FINANCIALDATASETS_BASE_URL = "https://api.financialdatasets.ai"
-FINANCIALDATASETS_API_KEY = os.getenv("FINANCIALDATASETS_API_KEY")
+# FINANCIALDATASETS_API_KEY = os.getenv("FINANCIALDATASETS_API_KEY") # Key will be fetched inside functions
+
+def fetch_financialdatasets_macro_interest_rates_snapshot():
+    """
+    Fetches the latest central bank interest rates snapshot from FinancialDatasets.ai.
+    See: https://docs.financialdatasets.ai/api-reference/endpoint/macro/interest-rates/snapshot
+    """
+    api_key = os.getenv("FINANCIALDATASETS_API_KEY")
+    if not api_key:
+        # Raising an exception is often better for library functions,
+        # but returning an error string is consistent with other fetchers here.
+        return "Error: FINANCIALDATASETS_API_KEY not set."
+
+    headers = {"X-API-KEY": api_key}
+    url = f"{FINANCIALDATASETS_BASE_URL}/macro/interest-rates/snapshot"
+
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()  # Raise HTTPError for bad responses (4XX or 5XX)
+        data = response.json()
+        interest_rates_list = data.get("interest_rates")
+
+        if interest_rates_list is None:
+            return "Error: 'interest_rates' key missing in API response."
+        if not isinstance(interest_rates_list, list):
+            return f"Error: 'interest_rates' should be a list, got {type(interest_rates_list)}."
+
+        return interest_rates_list
+    except requests.exceptions.HTTPError as http_err:
+        return f"HTTP error occurred while fetching interest rates: {http_err} - Response: {response.text}"
+    except requests.exceptions.RequestException as req_err:
+        return f"Request error occurred while fetching interest rates: {req_err}"
+    except json.JSONDecodeError:
+        return f"Error decoding JSON response from {url} for interest rates. Response: {response.text}"
+    except Exception as e:
+        return f"An unexpected error occurred in fetch_financialdatasets_macro_interest_rates_snapshot: {e}"
 
 def fetch_financialdatasets_news(ticker=None, start_date_str=None, end_date_str=None):
     """

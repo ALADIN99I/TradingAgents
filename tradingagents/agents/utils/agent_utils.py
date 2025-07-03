@@ -583,80 +583,48 @@ class Toolkit:
     @staticmethod
     @tool
     def get_global_news_openai( # type: ignore
-        curr_date: Annotated[str, "Current date in yyyy-mm-dd format"],
+        curr_date: Annotated[str, "Current date in yyyy-mm-dd format. Used for context if the macro endpoint supports it, otherwise fetches latest snapshot."],
         tool_call_id: Annotated[str, "The ID of the tool call"] = "get_global_news_openai_signature_fallback_id"
     ) -> ToolMessage:
         """
-        Retrieve global/macroeconomic news using FinancialDatasets.ai.
+        Fetches macroeconomic interest-rate snapshot data
+        from FinancialDatasets.ai (latest central-bank rates).
+        See: https://docs.financialdatasets.ai/api-reference/endpoint/macro/interest-rates/snapshot
         Args:
-            curr_date (str): Current date in yyyy-mm-dd format.
-            tool_call_id (str): The ID of the tool call, injected by the framework.
+            curr_date (str): Current date, potentially for context (though snapshot is latest).
+            tool_call_id (str): The ID of the tool call.
         Returns:
-            ToolMessage: A ToolMessage object containing the news or an error message.
+            ToolMessage: Contains formatted interest rate data or an error message.
         """
-        tool_name = "get_global_news_openai" # Keep original name for compatibility
+        tool_name = "get_global_news_openai"
         effective_tool_call_id = tool_call_id if isinstance(tool_call_id, str) and tool_call_id else f"{tool_name}_runtime_missing_or_empty_id"
         is_error_flag = False
         content_to_return = ""
 
         try:
-            # Calculate date range for the last 7 days
-            to_date_obj = datetime.fromisoformat(curr_date.split('T')[0])
-            from_date_obj = to_date_obj - timedelta(days=7)
-            from_date_str = from_date_obj.date().isoformat()
-            to_date_str = to_date_obj.date().isoformat()
+            raw_data = interface.fetch_financialdatasets_macro_interest_rates_snapshot()
 
-            raw_data = interface.fetch_financialdatasets_news(
-                ticker=None,
-                start_date_str=(datetime.fromisoformat(curr_date.split('T')[0]) - timedelta(days=7)).date().isoformat(),
-                end_date_str=curr_date.split('T')[0]
-            )
-
-            # 1. Catch plain-text error responses (if any from FinancialDatasets.ai not caught by requests.raise_for_status in interface)
-            # Note: ensure_not_plaintext_error was for Finnhub. If FinancialDatasets.ai returns structured errors (JSON),
-            # this might not be necessary or might need adjustment. For now, following the diff's intent.
-            # If raw_data is already an error string from interface.py, this check might be redundant or could even error.
-            # The interface.py fetch function already tries to return "Error: ..." strings.
-            # Let's assume if raw_data is a string, it's an error from the interface layer or a direct pass-through.
-
-            news_list_to_process = [] # Default to empty list
-
-            if isinstance(raw_data, str): # String from interface usually means an error occurred there
-                if raw_data.startswith("Error:"): # Error from our interface functions
-                     content_to_return = raw_data
-                     is_error_flag = True
-                else: # Potentially a direct string response from API not formatted as error by interface
-                     content_to_return = f"Unexpected string data from fetch_financialdatasets_news (global): {raw_data}"
-                     is_error_flag = True
-
-            elif isinstance(raw_data, dict):
-                news_list_to_process = raw_data.get("news")
-                if not isinstance(news_list_to_process, list):
-                    content_to_return = f"Error: Expected 'news' list in global response dict, got: {type(news_list_to_process)}"
-                    is_error_flag = True
-                    news_list_to_process = [] # Ensure it's an empty list to prevent further errors
-                # If it's a list, news_list_to_process is now set, and is_error_flag remains False (default)
+            if isinstance(raw_data, str) and raw_data.startswith("Error:"):
+                 content_to_return = raw_data
+                 is_error_flag = True
             elif isinstance(raw_data, list):
-                news_list_to_process = raw_data # Directly a list
-            else:
-                content_to_return = f"Error: Unexpected data type from fetch_financialdatasets_news (global): {type(raw_data)}"
+                if not raw_data:
+                    content_to_return = "No interest rate snapshot data available from FinancialDatasets.ai."
+                else:
+                    formatted_rates = ["Central Bank Interest Rates Snapshot:"]
+                    for item in raw_data:
+                        bank = item.get('bank', 'N/A')
+                        name = item.get('name', 'N/A')
+                        rate = item.get('rate', 'N/A')
+                        item_date = item.get('date', 'N/A')
+                        formatted_rates.append(f"- {name} ({bank}): {rate}% (as of {item_date})")
+                    content_to_return = "\n".join(formatted_rates)
+            else: # Handles if raw_data is not a list (e.g. dict without 'interest_rates' or other types)
+                content_to_return = f"Error: Expected list of rate records from macro snapshot, got {type(raw_data)}. Data: {str(raw_data)[:200]}"
                 is_error_flag = True
 
-            if not is_error_flag: # Only format if no error so far and we have a list
-                if not news_list_to_process: # Empty list
-                    content_to_return = "No global news found for the given period from FinancialDatasets.ai."
-                else:
-                    formatted_news = []
-                    for item in news_list_to_process[:15]: # Limit to 15 news items
-                        title = item.get('title', 'N/A')
-                        published_at = item.get('published_at', 'N/A')
-                        source_name = item.get('source_name', 'N/A')
-                        formatted_news.append(f"Title: {title}\nPublished: {published_at}\nSource: {source_name}\n---")
-                    content_to_return = "\n\n".join(formatted_news)
-            # If is_error_flag was set, content_to_return already holds the error message.
-
-        except Exception as e: # Catches ValueErrors from parsing, or any other exception
-            content_to_return = f"Unexpected error in {tool_name} for date {curr_date}: {e}"
+        except Exception as e:
+            content_to_return = f"Unexpected error in {tool_name} (fetching interest rates) for date {curr_date}: {e}"
             is_error_flag = True
 
         return ToolMessage(
