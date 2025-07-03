@@ -524,34 +524,44 @@ class Toolkit:
             to_date_str = to_date_obj.date().isoformat()
 
             # Call the new interface function for FinancialDatasets.ai
-            news_data = interface.fetch_financialdatasets_news(
+            raw_data = interface.fetch_financialdatasets_news(
                 ticker=ticker,
                 start_date_str=from_date_str,
                 end_date_str=to_date_str
             )
 
-            if isinstance(news_data, str) and news_data.startswith("Error:"):
-                # If the interface function returned an error string
-                error_content = news_data
+            news_list_to_process = None
+            is_error_flag = False
+            content_to_return = ""
+
+            if isinstance(raw_data, str) and raw_data.startswith("Error:"):
+                content_to_return = raw_data
                 is_error_flag = True
-                content_to_return = error_content
-            elif isinstance(news_data, list): # Assuming successful response is a list of news items
-                if not news_data:
+            elif isinstance(raw_data, dict):
+                news_list_to_process = raw_data.get("news")
+                if not isinstance(news_list_to_process, list):
+                    content_to_return = f"Error: 'news' key in response is not a list, got: {type(news_list_to_process)}"
+                    is_error_flag = True
+                    news_list_to_process = None # Ensure it's None so formatting is skipped
+            elif isinstance(raw_data, list): # Should not happen with current FinancialDatasets.ai /news but good for robustness
+                news_list_to_process = raw_data
+            else:
+                content_to_return = f"Error: Unexpected data type from fetch_financialdatasets_news: {type(raw_data)}"
+                is_error_flag = True
+
+            if not is_error_flag and news_list_to_process is not None:
+                if not news_list_to_process: # Empty list
                     content_to_return = "No news found for the given period from FinancialDatasets.ai."
                 else:
-                    # Format news data as a string for the LLM
                     formatted_news = []
-                    for item in news_data[:10]: # Limit to 10 news items for brevity
+                    for item in news_list_to_process[:10]: # Limit to 10 news items
                         title = item.get('title', 'N/A')
                         published_at = item.get('published_at', 'N/A')
                         source_name = item.get('source_name', 'N/A')
-                        # sentiment = item.get('sentiment_score', 'N/A') # Example if sentiment is available
-                        # summary = item.get('summary', 'N/A') # Example if summary is available
                         formatted_news.append(f"Title: {title}\nPublished: {published_at}\nSource: {source_name}\n---")
                     content_to_return = "\n\n".join(formatted_news)
-                is_error_flag = False
-            else: # Unexpected response type
-                content_to_return = f"Unexpected data type from fetch_financialdatasets_news: {type(news_data)}"
+            elif not is_error_flag and news_list_to_process is None: # Should be caught by above checks, but as a safeguard
+                content_to_return = "Error: News data is None after initial processing."
                 is_error_flag = True
 
             return ToolMessage(
@@ -566,7 +576,6 @@ class Toolkit:
             return ToolMessage(
                 name=tool_name,
                 content=error_content,
-                tool_call_id=effective_tool_call_id,
                 tool_call_id=effective_tool_call_id,
                 is_error=True
             )
@@ -597,28 +606,44 @@ class Toolkit:
             from_date_str = from_date_obj.date().isoformat()
             to_date_str = to_date_obj.date().isoformat()
 
-            news_data = interface.fetch_financialdatasets_news(
+            raw_data = interface.fetch_financialdatasets_news(
                 ticker=None,  # No ticker for global news
                 start_date_str=from_date_str,
                 end_date_str=to_date_str
             )
 
-            if isinstance(news_data, str) and news_data.startswith("Error:"):
-                content_to_return = news_data
+            news_list_to_process = None
+            # is_error_flag is already defined outside try-except
+            # content_to_return is already defined outside try-except
+
+            if isinstance(raw_data, str) and raw_data.startswith("Error:"):
+                content_to_return = raw_data
                 is_error_flag = True
-            elif isinstance(news_data, list):
-                if not news_data:
+            elif isinstance(raw_data, dict):
+                news_list_to_process = raw_data.get("news")
+                if not isinstance(news_list_to_process, list):
+                    content_to_return = f"Error: 'news' key in response is not a list, got: {type(news_list_to_process)}"
+                    is_error_flag = True
+                    news_list_to_process = None # Ensure it's None so formatting is skipped
+            elif isinstance(raw_data, list): # Robustness for unexpected direct list
+                news_list_to_process = raw_data
+            else:
+                content_to_return = f"Error: Unexpected data type from fetch_financialdatasets_news (global): {type(raw_data)}"
+                is_error_flag = True
+
+            if not is_error_flag and news_list_to_process is not None:
+                if not news_list_to_process: # Empty list
                     content_to_return = "No global news found for the given period from FinancialDatasets.ai."
                 else:
                     formatted_news = []
-                    for item in news_data[:15]: # Limit to 15 news items
+                    for item in news_list_to_process[:15]: # Limit to 15 news items
                         title = item.get('title', 'N/A')
                         published_at = item.get('published_at', 'N/A')
                         source_name = item.get('source_name', 'N/A')
                         formatted_news.append(f"Title: {title}\nPublished: {published_at}\nSource: {source_name}\n---")
                     content_to_return = "\n\n".join(formatted_news)
-            else:
-                content_to_return = f"Unexpected data type from fetch_financialdatasets_news (global): {type(news_data)}"
+            elif not is_error_flag and news_list_to_process is None:
+                content_to_return = "Error: Global news data is None after initial processing."
                 is_error_flag = True
 
         except Exception as e:
@@ -649,27 +674,45 @@ class Toolkit:
         content_to_return = ""
 
         try:
-            # Fetches latest annual balance sheet data (limit can be adjusted)
-            # The plan was to fetch balance sheets, as the original Finnhub call did.
-            fundamentals_data = interface.fetch_financialdatasets_statement(
+            # Fetches latest annual balance sheet data
+            raw_data = interface.fetch_financialdatasets_statement(
                 ticker=ticker,
                 statement_type="balance-sheets",
-                period="annual", # Finnhub version used 'annual' for 'bs'
-                limit=1 # Fetching the latest one
+                period="annual",
+                limit=1
             )
 
-            if isinstance(fundamentals_data, str) and fundamentals_data.startswith("Error:"):
-                content_to_return = fundamentals_data
+            actual_statements_data = None
+            # is_error_flag and content_to_return are already defined outside try-except
+
+            if isinstance(raw_data, str) and raw_data.startswith("Error:"):
+                content_to_return = raw_data
                 is_error_flag = True
-            elif isinstance(fundamentals_data, dict) or isinstance(fundamentals_data, list): # API might return a list of dicts or a single dict
-                if not fundamentals_data:
+            elif isinstance(raw_data, dict):
+                if "data" in raw_data and (isinstance(raw_data["data"], list) or isinstance(raw_data["data"], dict)):
+                    actual_statements_data = raw_data["data"]
+                elif not raw_data: # Empty dict
+                     actual_statements_data = {} # or an empty list depending on expected structure by LLM
+                else: # A dict, but not the expected wrapper structure, assume it's the data itself
+                    actual_statements_data = raw_data
+            elif isinstance(raw_data, list): # Direct list of statements
+                actual_statements_data = raw_data
+            else:
+                content_to_return = f"Error: Unexpected data type from fetch_financialdatasets_statement for {ticker}: {type(raw_data)}"
+                is_error_flag = True
+
+            if not is_error_flag and actual_statements_data is not None:
+                if not actual_statements_data: # Empty list or dict after extraction or if it was initially empty
                     content_to_return = f"No annual balance sheet data found for {ticker} from FinancialDatasets.ai."
                 else:
-                    # Convert dict/list of dicts to a JSON string for the LLM
-                    content_to_return = json.dumps(fundamentals_data, indent=2)
-            else:
-                content_to_return = f"Unexpected data type from fetch_financialdatasets_statement for {ticker}: {type(fundamentals_data)}"
-                is_error_flag = True
+                    try:
+                        content_to_return = json.dumps(actual_statements_data, indent=2)
+                    except TypeError as te:
+                        content_to_return = f"Error: Could not serialize fundamentals data to JSON for {ticker}: {te}"
+                        is_error_flag = True
+            elif not is_error_flag and actual_statements_data is None:
+                 content_to_return = f"Error: Fundamentals data is None after initial processing for {ticker}."
+                 is_error_flag = True
 
         except Exception as e:
             content_to_return = f"Unexpected error in {tool_name} for {ticker}: {e}"
