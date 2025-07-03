@@ -607,31 +607,42 @@ class Toolkit:
             to_date_str = to_date_obj.date().isoformat()
 
             raw_data = interface.fetch_financialdatasets_news(
-                ticker=None,  # No ticker for global news
-                start_date_str=from_date_str,
-                end_date_str=to_date_str
+                ticker=None,
+                start_date_str=(datetime.fromisoformat(curr_date.split('T')[0]) - timedelta(days=7)).date().isoformat(),
+                end_date_str=curr_date.split('T')[0]
             )
 
-            news_list_to_process = None
-            # is_error_flag is already defined outside try-except
-            # content_to_return is already defined outside try-except
+            # 1. Catch plain-text error responses (if any from FinancialDatasets.ai not caught by requests.raise_for_status in interface)
+            # Note: ensure_not_plaintext_error was for Finnhub. If FinancialDatasets.ai returns structured errors (JSON),
+            # this might not be necessary or might need adjustment. For now, following the diff's intent.
+            # If raw_data is already an error string from interface.py, this check might be redundant or could even error.
+            # The interface.py fetch function already tries to return "Error: ..." strings.
+            # Let's assume if raw_data is a string, it's an error from the interface layer or a direct pass-through.
 
-            if isinstance(raw_data, str) and raw_data.startswith("Error:"):
-                content_to_return = raw_data
-                is_error_flag = True
+            news_list_to_process = [] # Default to empty list
+
+            if isinstance(raw_data, str): # String from interface usually means an error occurred there
+                if raw_data.startswith("Error:"): # Error from our interface functions
+                     content_to_return = raw_data
+                     is_error_flag = True
+                else: # Potentially a direct string response from API not formatted as error by interface
+                     content_to_return = f"Unexpected string data from fetch_financialdatasets_news (global): {raw_data}"
+                     is_error_flag = True
+
             elif isinstance(raw_data, dict):
                 news_list_to_process = raw_data.get("news")
                 if not isinstance(news_list_to_process, list):
-                    content_to_return = f"Error: 'news' key in response is not a list, got: {type(news_list_to_process)}"
+                    content_to_return = f"Error: Expected 'news' list in global response dict, got: {type(news_list_to_process)}"
                     is_error_flag = True
-                    news_list_to_process = None # Ensure it's None so formatting is skipped
-            elif isinstance(raw_data, list): # Robustness for unexpected direct list
-                news_list_to_process = raw_data
+                    news_list_to_process = [] # Ensure it's an empty list to prevent further errors
+                # If it's a list, news_list_to_process is now set, and is_error_flag remains False (default)
+            elif isinstance(raw_data, list):
+                news_list_to_process = raw_data # Directly a list
             else:
                 content_to_return = f"Error: Unexpected data type from fetch_financialdatasets_news (global): {type(raw_data)}"
                 is_error_flag = True
 
-            if not is_error_flag and news_list_to_process is not None:
+            if not is_error_flag: # Only format if no error so far and we have a list
                 if not news_list_to_process: # Empty list
                     content_to_return = "No global news found for the given period from FinancialDatasets.ai."
                 else:
@@ -642,11 +653,9 @@ class Toolkit:
                         source_name = item.get('source_name', 'N/A')
                         formatted_news.append(f"Title: {title}\nPublished: {published_at}\nSource: {source_name}\n---")
                     content_to_return = "\n\n".join(formatted_news)
-            elif not is_error_flag and news_list_to_process is None:
-                content_to_return = "Error: Global news data is None after initial processing."
-                is_error_flag = True
+            # If is_error_flag was set, content_to_return already holds the error message.
 
-        except Exception as e:
+        except Exception as e: # Catches ValueErrors from parsing, or any other exception
             content_to_return = f"Unexpected error in {tool_name} for date {curr_date}: {e}"
             is_error_flag = True
 
