@@ -126,6 +126,7 @@ export OPENAI_API_KEY=$YOUR_OPENAI_API_KEY
 (Note: The system can be configured to use other LLM providers like OpenRouter; see `alpaca_trader.py` for examples if you wish to use an alternative to OpenAI.)
 
 YFinance is used for stock price data and does not require an API key.
+Additionally, the `get_global_news_openai(curr_date)` tool has been refactored to fetch macroeconomic data, specifically central bank interest rate snapshots, from FinancialDatasets.ai, rather than general global news articles.
 
 ### CLI Usage
 
