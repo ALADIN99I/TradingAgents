@@ -1,8 +1,10 @@
+import os
+
 import alpaca_trade_api as tradeapi
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
 from datetime import datetime
-import os
+
 import time # Added import for time.sleep()
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
@@ -583,7 +585,7 @@ if __name__ == "__main__":
     # You might also need to set OPENAI_API_KEY and FINNHUB_API_KEY for the TradingAgents framework.
 
 
-    ticker_to_trade = "GOOGL"  # Example: Trade SPDR S&P 500 ETF Trust
+    ticker_to_trade = "MSFT"  # Example: Trade SPDR S&P 500 ETF Trust
     # You can add more tickers to trade in a loop or manage a portfolio
     # For example:
     # portfolio_tickers = ["AAPL", "MSFT", "GOOGL"]
