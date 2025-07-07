@@ -6,6 +6,8 @@ from contextlib import contextmanager
 from typing import Annotated
 import os
 import re
+from pathlib import Path
+import logging
 
 ticker_to_company = {
     "AAPL": "Apple",
@@ -81,55 +83,68 @@ def fetch_top_from_category(
 
         all_content_curr_subreddit = []
 
-        with open(os.path.join(base_path, category, data_file), "rb") as f:
-            for i, line in enumerate(f):
-                # skip empty lines
-                if not line.strip():
-                    continue
-
-                parsed_line = json.loads(line)
-
-                # select only lines that are from the date
-                post_date = datetime.utcfromtimestamp(
-                    parsed_line["created_utc"]
-                ).strftime("%Y-%m-%d")
-                if post_date != date:
-                    continue
-
-                # if is company_news, check that the title or the content has the company's name (query) mentioned
-                if "company" in category and query:
-                    search_terms = []
-                    if "OR" in ticker_to_company[query]:
-                        search_terms = ticker_to_company[query].split(" OR ")
-                    else:
-                        search_terms = [ticker_to_company[query]]
-
-                    search_terms.append(query)
-
-                    found = False
-                    for term in search_terms:
-                        if re.search(
-                            term, parsed_line["title"], re.IGNORECASE
-                        ) or re.search(term, parsed_line["selftext"], re.IGNORECASE):
-                            found = True
-                            break
-
-                    if not found:
+        path_obj = Path(base_path) / category / data_file # Define path_obj early for logging in except
+        try:
+            sanitized_path = Path(str(path_obj).strip())
+            resolved_path = sanitized_path.resolve(strict=True)
+            logging.info(f"Attempting to open Reddit data file: {resolved_path}")
+            with open(resolved_path, "rb") as f:
+                for i, line in enumerate(f):
+                    # skip empty lines
+                    if not line.strip():
                         continue
 
-                post = {
-                    "title": parsed_line["title"],
-                    "content": parsed_line["selftext"],
-                    "url": parsed_line["url"],
-                    "upvotes": parsed_line["ups"],
-                    "posted_date": post_date,
-                }
+                    parsed_line = json.loads(line)
 
-                all_content_curr_subreddit.append(post)
+                    # select only lines that are from the date
+                    post_date = datetime.utcfromtimestamp(
+                        parsed_line["created_utc"]
+                    ).strftime("%Y-%m-%d")
+                    if post_date != date:
+                        continue
+
+                    # if is company_news, check that the title or the content has the company's name (query) mentioned
+                    if "company" in category and query:
+                        search_terms = []
+                        if "OR" in ticker_to_company[query]:
+                            search_terms = ticker_to_company[query].split(" OR ")
+                        else:
+                            search_terms = [ticker_to_company[query]]
+
+                        search_terms.append(query)
+
+                        found = False
+                        for term in search_terms:
+                            if re.search(
+                                term, parsed_line["title"], re.IGNORECASE
+                            ) or re.search(term, parsed_line["selftext"], re.IGNORECASE):
+                                found = True
+                                break
+
+                        if not found:
+                            continue
+
+                    post = {
+                        "title": parsed_line["title"],
+                        "content": parsed_line["selftext"],
+                        "url": parsed_line["url"],
+                        "upvotes": parsed_line["ups"],
+                        "posted_date": post_date,
+                    }
+                    all_content_curr_subreddit.append(post)
+
+        except FileNotFoundError:
+            # Log path_obj as sanitized_path might not be defined if Path(str(path_obj).strip()) failed before resolve
+            logging.error(f"Reddit data file not found for path: {path_obj}")
+            continue # to the next data_file
+        except Exception as e:
+            logging.error(f"Error loading Reddit data file '{data_file}' (path: {path_obj}): {e}")
+            continue # to the next data_file
 
         # sort all_content_curr_subreddit by upvote_ratio in descending order
-        all_content_curr_subreddit.sort(key=lambda x: x["upvotes"], reverse=True)
-
-        all_content.extend(all_content_curr_subreddit[:limit_per_subreddit])
+        # This block executes if try was successful or if it hit 'continue' in except (in which case all_content_curr_subreddit is empty)
+        if all_content_curr_subreddit: # Only sort and extend if list is not empty
+            all_content_curr_subreddit.sort(key=lambda x: x["upvotes"], reverse=True)
+            all_content.extend(all_content_curr_subreddit[:limit_per_subreddit])
 
     return all_content

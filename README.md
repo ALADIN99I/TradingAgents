@@ -114,31 +114,20 @@ pip install -r requirements.txt
 
 ### Required APIs
 
-You will also need the FinnHub API for financial data. All of our code is implemented with the free tier.
+This project uses the FinancialDatasets.ai API for news and financial statement data. You can get a free API key from their website [FinancialDatasets.ai](https://financialdatasets.ai/) and set it as an environment variable:
 ```bash
-export FINNHUB_API_KEY=$YOUR_FINNHUB_API_KEY
-<<<<<<< HEAD
+export FINANCIALDATASETS_API_KEY=$YOUR_FINANCIALDATASETS_API_KEY
 ```
-=======
-#d0u99jhr01qn5fk3v8rgd0u99jhr01qn5fk3v8s0
-```
-#https://paper-api.alpaca.markets/v2
-#PKHNQQLTBXQFBIRW8T95
-#zPd6VAIzKhFFFVNyYFw79gSL4bnXerryeW4kfbMU
->>>>>>> 2e1c03e (with keys updated!)
 
-You will need the OpenAI API for all the agents.
+You will also need an OpenAI API key for the LLM agents.
 ```bash
 export OPENAI_API_KEY=$YOUR_OPENAI_API_KEY
-<<<<<<< HEAD
 ```
+(Note: The system can be configured to use other LLM providers like OpenRouter; see `alpaca_trader.py` for examples if you wish to use an alternative to OpenAI.)
 
-=======
+YFinance is used for stock price data and does not require an API key.
+Additionally, the `get_global_news_openai(curr_date)` tool has been refactored to fetch macroeconomic data, specifically central bank interest rate snapshots, from FinancialDatasets.ai, rather than general global news articles.
 
-```
-#openrouter
-#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
->>>>>>> 2e1c03e (with keys updated!)
 ### CLI Usage
 
 You can also try out the CLI directly by running:

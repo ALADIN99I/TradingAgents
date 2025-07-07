@@ -12,9 +12,122 @@ import os
 import pandas as pd
 from tqdm import tqdm
 import yfinance as yf
+import requests # Added for FinancialDatasets.ai
 from openai import OpenAI
 from .config import get_config, set_config, DATA_DIR
+from pathlib import Path
+import logging
 
+# Constants for FinancialDatasets.ai
+FINANCIALDATASETS_BASE_URL = "https://api.financialdatasets.ai"
+# FINANCIALDATASETS_API_KEY = os.getenv("FINANCIALDATASETS_API_KEY") # Key will be fetched inside functions
+
+def fetch_financialdatasets_macro_interest_rates_snapshot():
+    """
+    Fetches the latest central bank interest rates snapshot from FinancialDatasets.ai.
+    See: https://docs.financialdatasets.ai/api-reference/endpoint/macro/interest-rates/snapshot
+    """
+    api_key = os.getenv("FINANCIALDATASETS_API_KEY")
+    if not api_key:
+        # Raising an exception is often better for library functions,
+        # but returning an error string is consistent with other fetchers here.
+        return "Error: FINANCIALDATASETS_API_KEY not set."
+
+    headers = {"X-API-KEY": api_key}
+    url = f"{FINANCIALDATASETS_BASE_URL}/macro/interest-rates/snapshot"
+
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()  # Raise HTTPError for bad responses (4XX or 5XX)
+        data = response.json()
+        interest_rates_list = data.get("interest_rates")
+
+        if interest_rates_list is None:
+            return "Error: 'interest_rates' key missing in API response."
+        if not isinstance(interest_rates_list, list):
+            return f"Error: 'interest_rates' should be a list, got {type(interest_rates_list)}."
+
+        return interest_rates_list
+    except requests.exceptions.HTTPError as http_err:
+        return f"HTTP error occurred while fetching interest rates: {http_err} - Response: {response.text}"
+    except requests.exceptions.RequestException as req_err:
+        return f"Request error occurred while fetching interest rates: {req_err}"
+    except json.JSONDecodeError:
+        return f"Error decoding JSON response from {url} for interest rates. Response: {response.text}"
+    except Exception as e:
+        return f"An unexpected error occurred in fetch_financialdatasets_macro_interest_rates_snapshot: {e}"
+
+def fetch_financialdatasets_news(ticker=None, start_date_str=None, end_date_str=None):
+    """
+    Fetches news from FinancialDatasets.ai.
+    For company news, provide a ticker. For global news, omit the ticker.
+    Dates should be in YYYY-MM-DD format.
+    """
+    api_key = os.getenv("FINANCIALDATASETS_API_KEY")
+    if not api_key:
+        return "Error: FINANCIALDATASETS_API_KEY not set."
+
+    headers = {"X-API-KEY": api_key}
+    params = {}
+    if ticker:
+        params["ticker"] = ticker
+    if start_date_str:
+        params["from_date"] = start_date_str
+    if end_date_str:
+        params["to_date"] = end_date_str
+
+    url = f"{FINANCIALDATASETS_BASE_URL}/news"
+
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=10)
+        response.raise_for_status()  # Raise HTTPError for bad responses (4XX or 5XX)
+        return response.json()
+    except requests.exceptions.HTTPError as http_err:
+        return f"HTTP error occurred: {http_err} - Response: {response.text}"
+    except requests.exceptions.RequestException as req_err:
+        return f"Request error occurred: {req_err}"
+    except json.JSONDecodeError:
+        return f"Error decoding JSON response from {url}. Response: {response.text}"
+    except Exception as e:
+        return f"An unexpected error occurred in fetch_financialdatasets_news: {e}"
+
+def fetch_financialdatasets_statement(ticker, statement_type, period="quarterly", limit=4):
+    """
+    Fetches financial statements (income-statements, balance-sheets, cash-flow-statements)
+    from FinancialDatasets.ai.
+    """
+    api_key = os.getenv("FINANCIALDATASETS_API_KEY")
+    if not api_key:
+        return "Error: FINANCIALDATASETS_API_KEY not set."
+    if not ticker:
+        return "Error: Ticker symbol is required for fetching financial statements."
+
+    valid_statement_types = ["income-statements", "balance-sheets", "cash-flow-statements"]
+    if statement_type not in valid_statement_types:
+        return f"Error: Invalid statement type '{statement_type}'. Must be one of {valid_statement_types}."
+
+    headers = {"X-API-KEY": api_key}
+    params = {
+        "ticker": ticker,
+        "period": period,
+        "limit": limit,
+    }
+    url = f"{FINANCIALDATASETS_BASE_URL}/financials/{statement_type}"
+
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=10)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.HTTPError as http_err:
+        return f"HTTP error occurred: {http_err} - Response: {response.text}"
+    except requests.exceptions.RequestException as req_err:
+        return f"Request error occurred: {req_err}"
+    except json.JSONDecodeError:
+        return f"Error decoding JSON response from {url}. Response: {response.text}"
+    except Exception as e:
+        return f"An unexpected error occurred in fetch_financialdatasets_statement: {e}"
+
+# --- Existing Finnhub (to be replaced/removed by agent_utils.py updates) and other functions below ---
 
 def get_finnhub_news(
     ticker: Annotated[
@@ -158,7 +271,18 @@ def get_simfin_balance_sheet(
         "us",
         f"us-balance-{freq}.csv",
     )
-    df = pd.read_csv(data_path, sep=";")
+    try:
+        # 🎯 FIX: Sanitize and resolve the path at the point of use.
+        sanitized_path_str = str(data_path).strip()
+        resolved_path = Path(sanitized_path_str).resolve(strict=True)
+        logging.info(f"get_simfin_balance_sheet: Successfully resolved path {resolved_path}")
+        df = pd.read_csv(resolved_path, sep=";")
+    except FileNotFoundError:
+        logging.error(f"get_simfin_balance_sheet: File not found at path: {data_path} (sanitized: {sanitized_path_str})")
+        return "Balance sheet data file not found."
+    except Exception as e:
+        logging.error(f"get_simfin_balance_sheet: Error processing file '{data_path}': {e}")
+        return f"An error occurred while reading balance sheet data: {e}"
 
     # Convert date strings to datetime objects and remove any time components
     df["Report Date"] = pd.to_datetime(df["Report Date"], utc=True).dt.normalize()
@@ -205,7 +329,18 @@ def get_simfin_cashflow(
         "us",
         f"us-cashflow-{freq}.csv",
     )
-    df = pd.read_csv(data_path, sep=";")
+    try:
+        # 🎯 FIX: Sanitize and resolve the path at the point of use.
+        sanitized_path_str = str(data_path).strip()
+        resolved_path = Path(sanitized_path_str).resolve(strict=True)
+        logging.info(f"get_simfin_cashflow: Successfully resolved path {resolved_path}")
+        df = pd.read_csv(resolved_path, sep=";")
+    except FileNotFoundError:
+        logging.error(f"get_simfin_cashflow: File not found at path: {data_path} (sanitized: {sanitized_path_str})")
+        return "Cashflow data file not found."
+    except Exception as e:
+        logging.error(f"get_simfin_cashflow: Error processing file '{data_path}': {e}")
+        return f"An error occurred while reading cashflow data: {e}"
 
     # Convert date strings to datetime objects and remove any time components
     df["Report Date"] = pd.to_datetime(df["Report Date"], utc=True).dt.normalize()
@@ -252,7 +387,18 @@ def get_simfin_income_statements(
         "us",
         f"us-income-{freq}.csv",
     )
-    df = pd.read_csv(data_path, sep=";")
+    try:
+        # 🎯 FIX: Sanitize and resolve the path at the point of use.
+        sanitized_path_str = str(data_path).strip()
+        resolved_path = Path(sanitized_path_str).resolve(strict=True)
+        logging.info(f"get_simfin_income_statements: Successfully resolved path {resolved_path}")
+        df = pd.read_csv(resolved_path, sep=";")
+    except FileNotFoundError:
+        logging.error(f"get_simfin_income_statements: File not found at path: {data_path} (sanitized: {sanitized_path_str})")
+        return "Income statement data file not found."
+    except Exception as e:
+        logging.error(f"get_simfin_income_statements: Error processing file '{data_path}': {e}")
+        return f"An error occurred while reading income statement data: {e}"
 
     # Convert date strings to datetime objects and remove any time components
     df["Report Date"] = pd.to_datetime(df["Report Date"], utc=True).dt.normalize()

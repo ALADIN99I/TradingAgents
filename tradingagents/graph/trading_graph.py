@@ -4,6 +4,7 @@ import os
 import time # Added for rate limiting delays
 from pathlib import Path
 import json
+import logging
 from datetime import date # Ensure date is imported
 from typing import Dict, Any, Tuple, List, Optional
 
