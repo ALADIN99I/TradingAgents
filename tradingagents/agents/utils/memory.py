@@ -9,7 +9,7 @@ import numpy as np
 
 # Langchain imports based on the new __init__
 from langchain_openai.embeddings import OpenAIEmbeddings
-from langchain_chroma import Chroma # Corrected import path
+from langchain_community.vectorstores import Chroma # Corrected import path
 
 # Configure basic logging
 logging.basicConfig(level=logging.INFO)

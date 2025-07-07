@@ -518,61 +518,35 @@ class Toolkit:
 
         try:
             # Calculate date range for the last 7 days
-            to_date_obj = datetime.fromisoformat(curr_date.split('T')[0])
+            to_date_obj = datetime.fromisoformat(curr_date.split('T')[0]) # Handle potential 'T' in date string
             from_date_obj = to_date_obj - timedelta(days=7)
             from_date_str = from_date_obj.date().isoformat()
             to_date_str = to_date_obj.date().isoformat()
 
-            # Call the new interface function for FinancialDatasets.ai
-            raw_data = interface.fetch_financialdatasets_news(
-                ticker=ticker,
-                start_date_str=from_date_str,
-                end_date_str=to_date_str
-            )
+            raw_finnhub_output = finnhub_client.company_news(symbol=ticker, _from=from_date_str, to=to_date_str)
 
-            news_list_to_process = None
-            is_error_flag = False
-            content_to_return = ""
+            ensure_not_plaintext_error(raw_finnhub_output, tool_name) # Check for simple string errors first
 
-            if isinstance(raw_data, str) and raw_data.startswith("Error:"):
-                content_to_return = raw_data
-                is_error_flag = True
-            elif isinstance(raw_data, dict):
-                news_list_to_process = raw_data.get("news")
-                if not isinstance(news_list_to_process, list):
-                    content_to_return = f"Error: 'news' key in response is not a list, got: {type(news_list_to_process)}"
-                    is_error_flag = True
-                    news_list_to_process = None # Ensure it's None so formatting is skipped
-            elif isinstance(raw_data, list): # Should not happen with current FinancialDatasets.ai /news but good for robustness
-                news_list_to_process = raw_data
+            if isinstance(raw_finnhub_output, dict) and raw_finnhub_output.get("error"):
+                raise ValueError(f"{tool_name}: Finnhub API returned an error: {raw_finnhub_output['error']}")
+
+            # Assuming successful output from finnhub_client.company_news is a list of news items (dicts)
+            # Convert the list of dicts to a JSON string for the ToolMessage content
+            # If raw_finnhub_output is None or not a list/dict, json.dumps might raise error or return "null"
+            # Add a check for None or empty list to return a more specific message.
+            if raw_finnhub_output is None or (isinstance(raw_finnhub_output, list) and not raw_finnhub_output):
+                successful_data_string = "No news found for the given period."
             else:
-                content_to_return = f"Error: Unexpected data type from fetch_financialdatasets_news: {type(raw_data)}"
-                is_error_flag = True
+                successful_data_string = json.dumps(raw_finnhub_output)
 
-            if not is_error_flag and news_list_to_process is not None:
-                if not news_list_to_process: # Empty list
-                    content_to_return = "No news found for the given period from FinancialDatasets.ai."
-                else:
-                    formatted_news = []
-                    for item in news_list_to_process[:10]: # Limit to 10 news items
-                        title = item.get('title', 'N/A')
-                        published_at = item.get('published_at', 'N/A')
-                        source_name = item.get('source_name', 'N/A')
-                        formatted_news.append(f"Title: {title}\nPublished: {published_at}\nSource: {source_name}\n---")
-                    content_to_return = "\n\n".join(formatted_news)
-            elif not is_error_flag and news_list_to_process is None: # Should be caught by above checks, but as a safeguard
-                content_to_return = "Error: News data is None after initial processing."
-                is_error_flag = True
 
             return ToolMessage(
                 name=tool_name,
-                content=content_to_return,
+                content=successful_data_string,
                 tool_call_id=effective_tool_call_id,
-                is_error=is_error_flag
             )
         except Exception as e:
-            # Catch-all for any other unexpected errors during this tool's execution
-            error_content = f"Unexpected error in {tool_name} for {ticker} processing date {curr_date}: {e}"
+            error_content = f"Error in {tool_name} for {ticker} processing date {curr_date}: {e}"
             return ToolMessage(
                 name=tool_name,
                 content=error_content,
@@ -583,121 +557,82 @@ class Toolkit:
     @staticmethod
     @tool
     def get_global_news_openai( # type: ignore
-        curr_date: Annotated[str, "Current date in yyyy-mm-dd format. Used for context if the macro endpoint supports it, otherwise fetches latest snapshot."],
+        curr_date: Annotated[str, "Current date in yyyy-mm-dd format"],
         tool_call_id: Annotated[str, "The ID of the tool call"] = "get_global_news_openai_signature_fallback_id"
     ) -> ToolMessage:
         """
-        Fetches macroeconomic interest-rate snapshot data
-        from FinancialDatasets.ai (latest central-bank rates).
-        See: https://docs.financialdatasets.ai/api-reference/endpoint/macro/interest-rates/snapshot
+        Retrieve the latest macroeconomics news on a given date using OpenAI's macroeconomics news API.
         Args:
-            curr_date (str): Current date, potentially for context (though snapshot is latest).
-            tool_call_id (str): The ID of the tool call.
+            curr_date (str): Current date in yyyy-mm-dd format
+            tool_call_id (str): The ID of the tool call, injected by the framework.
         Returns:
-            ToolMessage: Contains formatted interest rate data or an error message.
+            ToolMessage: A ToolMessage object containing the news or an error message.
         """
         tool_name = "get_global_news_openai"
         effective_tool_call_id = tool_call_id if isinstance(tool_call_id, str) and tool_call_id else f"{tool_name}_runtime_missing_or_empty_id"
-        is_error_flag = False
-        content_to_return = ""
-
         try:
-            raw_data = interface.fetch_financialdatasets_macro_interest_rates_snapshot()
+            # This tool, by its name, seems intended to use an OpenAI source, not Finnhub.
+            # The patch provided was specific to Finnhub-backed tools.
+            # It will retain its previous error handling structure which includes heuristics.
+            raw_interface_output = interface.get_global_news_openai(curr_date)
 
-            if isinstance(raw_data, str) and raw_data.startswith("Error:"):
-                 content_to_return = raw_data
-                 is_error_flag = True
-            elif isinstance(raw_data, list):
-                if not raw_data:
-                    content_to_return = "No interest rate snapshot data available from FinancialDatasets.ai."
-                else:
-                    formatted_rates = ["Central Bank Interest Rates Snapshot:"]
-                    for item in raw_data:
-                        bank = item.get('bank', 'N/A')
-                        name = item.get('name', 'N/A')
-                        rate = item.get('rate', 'N/A')
-                        item_date = item.get('date', 'N/A')
-                        formatted_rates.append(f"- {name} ({bank}): {rate}% (as of {item_date})")
-                    content_to_return = "\n".join(formatted_rates)
-            else: # Handles if raw_data is not a list (e.g. dict without 'interest_rates' or other types)
-                content_to_return = f"Error: Expected list of rate records from macro snapshot, got {type(raw_data)}. Data: {str(raw_data)[:200]}"
-                is_error_flag = True
+            if isinstance(raw_interface_output, str):
+                # Heuristic check for common non-JSON error patterns or HTML
+                lower_output = raw_interface_output.lower()
+                error_keywords = ["error", "failed", "invalid", "unavailable", "forbidden", "unauthorized", "limit exceeded", "not found", "service unavailable"]
+                html_tags = ["<html>", "<body>", "<head>", "<!doctype html"]
+                if any(keyword in lower_output for keyword in error_keywords) or \
+                   any(tag in lower_output for tag in html_tags):
+                    output_snippet = raw_interface_output[:200] + "..." if len(raw_interface_output) > 200 else raw_interface_output
+                    raise ValueError(f"Suspected non-JSON/HTML error string returned by interface for {tool_name}: '{output_snippet}'")
+                try:
+                    parsed_output = json.loads(raw_interface_output)
+                    if isinstance(parsed_output, dict) and "error" in parsed_output:
+                        raise ValueError(f"API returned a JSON error for {tool_name}: {parsed_output.get('error')}")
+                except json.JSONDecodeError:
+                    stripped_output = raw_interface_output.strip()
+                    if not (stripped_output.startswith('{') or stripped_output.startswith('[')):
+                        if len(stripped_output) > 20 and "success" not in stripped_output.lower() and "ok" not in stripped_output.lower():
+                            output_snippet = stripped_output[:200] + "..." if len(stripped_output) > 200 else stripped_output
+                            raise ValueError(f"Suspected generic non-JSON, non-affirmative string for {tool_name}: '{output_snippet}'")
+                    pass # Let it be treated as successful content if it's not caught by heuristics
 
+            successful_data_string = raw_interface_output
+            if not isinstance(successful_data_string, str):
+                successful_data_string = str(successful_data_string)
+            return ToolMessage(content=successful_data_string, name=tool_name, tool_call_id=effective_tool_call_id)
         except Exception as e:
-            content_to_return = f"Unexpected error in {tool_name} (fetching interest rates) for date {curr_date}: {e}"
-            is_error_flag = True
-
-        return ToolMessage(
-            name=tool_name,
-            content=content_to_return,
-            tool_call_id=effective_tool_call_id,
-            is_error=is_error_flag
-        )
+            error_string = f"Error in {tool_name} for date {curr_date}: {e}"
+            return ToolMessage(content=error_string, name=tool_name, tool_call_id=effective_tool_call_id, is_error=True)
 
     @staticmethod
     @tool
     def get_fundamentals_openai( # type: ignore
         ticker: Annotated[str, "the company's ticker"],
-        curr_date: Annotated[str, "Current date in yyyy-mm-dd format (used for context, not directly by API if fetching latest)"],
+        curr_date: Annotated[str, "Current date in yyyy-mm-dd format"], # curr_date is not used by finnhub_client.financials
         tool_call_id: Annotated[str, "The ID of the tool call"] = "get_fundamentals_openai_signature_fallback_id"
     ) -> ToolMessage:
         """
-        Fetch company fundamentals (Balance Sheet) using FinancialDatasets.ai.
-        Note: Tool name includes 'openai' for historical/compatibility reasons.
+        Fetch company fundamentals (balance sheet) from Finnhub. Handles Finnhub-specific errors.
+        Note: Tool name includes 'openai' for historical/compatibility reasons, but now uses Finnhub.
         """
         tool_name = "get_fundamentals_openai"
         effective_tool_call_id = tool_call_id if isinstance(tool_call_id, str) and tool_call_id else f"{tool_name}_runtime_missing_or_empty_id"
-        is_error_flag = False
-        content_to_return = ""
 
         try:
-            # Fetches latest annual balance sheet data
-            raw_data = interface.fetch_financialdatasets_statement(
-                ticker=ticker,
-                statement_type="balance-sheets",
-                period="annual",
-                limit=1
-            )
+            raw_finnhub_output = finnhub_client.financials(symbol=ticker, statement="bs", freq="annual")
 
-            actual_statements_data = None
-            # is_error_flag and content_to_return are already defined outside try-except
+            ensure_not_plaintext_error(raw_finnhub_output, tool_name) # Check for simple string errors first
 
-            if isinstance(raw_data, str) and raw_data.startswith("Error:"):
-                content_to_return = raw_data
-                is_error_flag = True
-            elif isinstance(raw_data, dict):
-                if "data" in raw_data and (isinstance(raw_data["data"], list) or isinstance(raw_data["data"], dict)):
-                    actual_statements_data = raw_data["data"]
-                elif not raw_data: # Empty dict
-                     actual_statements_data = {} # or an empty list depending on expected structure by LLM
-                else: # A dict, but not the expected wrapper structure, assume it's the data itself
-                    actual_statements_data = raw_data
-            elif isinstance(raw_data, list): # Direct list of statements
-                actual_statements_data = raw_data
-            else:
-                content_to_return = f"Error: Unexpected data type from fetch_financialdatasets_statement for {ticker}: {type(raw_data)}"
-                is_error_flag = True
+            if isinstance(raw_finnhub_output, dict) and raw_finnhub_output.get("error"):
+                raise ValueError(f"{tool_name}: Finnhub API returned an error: {raw_finnhub_output['error']}")
 
-            if not is_error_flag and actual_statements_data is not None:
-                if not actual_statements_data: # Empty list or dict after extraction or if it was initially empty
-                    content_to_return = f"No annual balance sheet data found for {ticker} from FinancialDatasets.ai."
-                else:
-                    try:
-                        content_to_return = json.dumps(actual_statements_data, indent=2)
-                    except TypeError as te:
-                        content_to_return = f"Error: Could not serialize fundamentals data to JSON for {ticker}: {te}"
-                        is_error_flag = True
-            elif not is_error_flag and actual_statements_data is None:
-                 content_to_return = f"Error: Fundamentals data is None after initial processing for {ticker}."
-                 is_error_flag = True
+            if not raw_finnhub_output:
+                 raise ValueError(f"{tool_name}: No data returned from Finnhub for {ticker}.")
 
+            successful_data_string = json.dumps(raw_finnhub_output)
+
+            return ToolMessage(content=successful_data_string, name=tool_name, tool_call_id=effective_tool_call_id)
         except Exception as e:
-            content_to_return = f"Unexpected error in {tool_name} for {ticker}: {e}"
-            is_error_flag = True
-
-        return ToolMessage(
-            name=tool_name,
-            content=content_to_return,
-            tool_call_id=effective_tool_call_id,
-            is_error=is_error_flag
-        )
+            error_content = f"Error in {tool_name} for {ticker}: {e}"
+            return ToolMessage(content=error_content, name=tool_name, tool_call_id=effective_tool_call_id, is_error=True)
