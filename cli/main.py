@@ -748,6 +748,17 @@ def run_analysis():
     graph = TradingAgentsGraph(
         [analyst.value for analyst in selections["analysts"]], config=config, debug=True
     )
+    # CONCEPTUAL CHANGE FOR REFLECTION (Persistence):
+    # For learning to be effective across CLI sessions, the FinancialSituationMemory
+    # (e.g., bull_memory, trader_memory) needs to be persisted.
+    # This would involve:
+    # 1. Adding save_memories(filepath) and load_memories(filepath) methods to TradingAgentsGraph.
+    # 2. Calling load_memories() after graph initialization:
+    #    # graph.load_memories(memory_filepath) # Example
+    # 3. Calling save_memories() after reflect_and_remember():
+    #    # graph.save_memories(memory_filepath) # Example
+    # The memory_filepath could be tied to the ticker or a general agent brain.
+
 
     # Create result directory
     results_dir = Path(config["results_dir"]) / selections["ticker"] / selections["analysis_date"]
@@ -1076,6 +1087,19 @@ def run_analysis():
         # Get final state and decision
         final_state = trace[-1]
         decision = graph.process_signal(final_state["final_trade_decision"])
+
+        # CONCEPTUAL CHANGE FOR REFLECTION:
+        # To enable learning, after a decision is made, its outcome (profit/loss) needs to be determined.
+        # This could be done via:
+        # 1. A simplified market simulation based on the decision.
+        # 2. Prompting the user to input the outcome if they acted on the advice.
+        # This outcome (returns_losses) would then be passed to reflect_and_remember.
+        # Example:
+        # returns_losses = determine_trade_outcome(decision, final_state, selections) # Placeholder function
+        # if returns_losses:
+        #     graph.reflect_and_remember(returns_losses)
+        #     message_buffer.add_message("System", "Agent reflection based on trade outcome completed.")
+        #     # Potentially save updated memories if persistence is desired (see persistence comment near graph initialization)
 
         # Update all agent statuses to completed
         for agent in message_buffer.agent_status:
