@@ -1,89 +1,53 @@
 import functools
 import time
 import json
-import re # Added for regex operations
+# import re # No longer needed for the new parser
 
-
-def parse_json_decision(raw: str, company_name_for_fallback: str) -> dict:
+# New robust JSON parser based on brace counting
+def parse_json_decision(text: str): # Removed company_name_for_fallback from signature
     """
-    Extracts and parses JSON decision from raw LLM output.
-    Provides a fallback if parsing or validation fails.
+    Extract JSON objects from text using robust JSON parsing.
+    Returns a list of parsed JSON objects.
     """
-    # Attempt to extract JSON object using regex; this is good for nested structures
-    # and handles cases where JSON might be embedded in other text.
-    # This regex finds the first complete JSON object.
-    match = re.search(r"\{(?:[^{}]|(?R))*\}", raw, re.DOTALL)
-    json_str_to_parse = ""
+    results = []
+    i = 0
 
-    if match:
-        json_str_to_parse = match.group(0)
-    else:
-        # If regex fails, try a simpler approach: strip common markdown and find first/last brace
-        temp_str = raw.strip()
-        if temp_str.startswith("```json"): # Handle ```json
-            temp_str = temp_str[7:]
-        elif temp_str.startswith("```"): # Handle ```
-            temp_str = temp_str[3:]
+    while i < len(text):
+        if text[i] == '{':
+            brace_count = 0
+            start = i
 
-        if temp_str.endswith("```"):
-            temp_str = temp_str[:-3]
-        temp_str = temp_str.strip()
+            # Count braces to find complete JSON object
+            while i < len(text):
+                if text[i] == '{':
+                    brace_count += 1
+                elif text[i] == '}':
+                    brace_count -= 1
 
-        start_brace = temp_str.find('{')
-        end_brace = temp_str.rfind('}')
-        if start_brace != -1 and end_brace != -1 and end_brace > start_brace:
-            json_str_to_parse = temp_str[start_brace : end_brace+1]
-        else:
-            # Fallback to the stripped string if no clear JSON structure is found by braces
-            # This might be an already clean JSON or will fail parsing, caught by try-except below.
-            json_str_to_parse = temp_str
+                    if brace_count == 0:
+                        json_str = text[start:i+1]
+                        try:
+                            # Basic cleaning of common non-JSON prefixes/suffixes before parsing
+                            # This is a simplified version of what might be needed.
+                            # More sophisticated stripping might be required if LLM output is very messy.
+                            if json_str.strip().startswith("```json"):
+                                json_str = json_str.strip()[7:]
+                            elif json_str.strip().startswith("```"):
+                                json_str = json_str.strip()[3:]
+                            if json_str.strip().endswith("```"):
+                                json_str = json_str.strip()[:-3]
 
-    try:
-        if not json_str_to_parse.strip().startswith("{") or not json_str_to_parse.strip().endswith("}"):
-             # If after all attempts, it doesn't look like a JSON object string
-            raise json.JSONDecodeError("No valid JSON object found in LLM output", raw, 0)
+                            parsed = json.loads(json_str.strip())
+                            results.append(parsed)
+                        except json.JSONDecodeError:
+                            # Using print for now as logging isn't set up in this scope
+                            # print(f"TRADER_NODE (new parse_json_decision): Skipping invalid JSON segment: '{json_str[:100]}...'")
+                            pass  # Skip invalid JSON
+                        break # Found a balanced object (valid or not), move outer loop cursor
+                i += 1
+        i += 1 # Move to next character in the outer loop
 
-        data = json.loads(json_str_to_parse)
-
-        # Validate essential keys
-        if not isinstance(data, dict) or \
-           "action" not in data or \
-           "symbol" not in data:
-            raise json.JSONDecodeError(
-                f"Missing essential keys ('action', 'symbol') in parsed JSON. Parsed: {str(data)[:200]}",
-                json_str_to_parse, 0
-            )
-
-        # Ensure symbol is a string, using fallback if it's structured unexpectedly or missing
-        if not isinstance(data.get("symbol"), str) or not data.get("symbol"):
-            data["symbol"] = company_name_for_fallback
-
-        # Default conviction score for HOLD if missing
-        if data.get("action") == "HOLD" and "conviction_score" not in data:
-            data["conviction_score"] = 0.0
-
-        # Default conviction score for BUY/SELL if missing, and annotate reason
-        if data.get("action") in ["BUY", "SELL"] and "conviction_score" not in data:
-            data["conviction_score"] = 0.5  # Default to neutral
-            current_reason = data.get("reason", "")
-            default_reason_note = "(Conviction score defaulted as LLM did not provide it)"
-            data["reason"] = f"{current_reason} {default_reason_note}".strip() if current_reason else default_reason_note
-
-        # Ensure reason is present
-        if "reason" not in data:
-            data["reason"] = "Reason not provided by LLM."
-
-        return data
-
-    except json.JSONDecodeError as e:
-        # Using print for now as logging isn't set up in this scope
-        print(f"TRADER_NODE (parse_json_decision): Error parsing LLM JSON output: {e}. Attempted to parse: '{json_str_to_parse[:500]}...' Raw input: '{raw[:500]}...'")
-        return {
-            "action": "HOLD",
-            "symbol": company_name_for_fallback,
-            "conviction_score": 0.0,
-            "reason": f"Failed to parse LLM decision. Error: {e}. Raw LLM output snippet: {raw[:200]}..."
-        }
+    return results
 
 
 def create_trader(llm, memory):
@@ -102,19 +66,12 @@ def create_trader(llm, memory):
         for i, rec in enumerate(past_memories, 1):
             past_memory_str += rec["recommendation"] + "\n\n"
 
-        # Assuming 'potential_trades' is now available in the state, populated by an upstream node (e.g., Research Manager)
-        # Each trade in potential_trades should be a dict with 'action', 'symbol', 'reason', and 'conviction_score'
         potential_trades = state.get("potential_trades", [])
-
         formatted_trades = "No specific pre-assessed trades provided."
         if potential_trades:
             formatted_trades = "Potential trades under consideration (with conviction scores):\n"
             for trade in potential_trades:
                 formatted_trades += f"- {trade.get('action','N/A_ACTION')} {trade.get('symbol','N/A_SYMBOL')}: {trade.get('reason','N/A_REASON')} (Conviction: {trade.get('conviction_score', 'N/A')})\n"
-        else:
-            # This case means potential_trades was empty or not in state.
-            # The LLM will have to rely more on the investment_plan.
-            pass
 
         context_content = (
             f"Company: {company_name}\n\n"
@@ -157,12 +114,61 @@ Utilize lessons from past decisions: {past_memory_str}"""
 
         response = llm.invoke(messages)
 
-        # Use the new helper function to parse the decision
-        # Pass company_name for fallback purposes within the parser
-        trade_decision_data = parse_json_decision(response.content, company_name)
+        # Call the new parse_json_decision function
+        parsed_json_list = parse_json_decision(response.content)
+
+        trade_decision_data = None
+        raw_llm_output_for_fallback = response.content # Store raw output for fallback message
+
+        if parsed_json_list:
+            # Assuming the first valid JSON object is the one we want
+            potential_data = parsed_json_list[0]
+
+            # --- Apply validation and defaulting logic (moved from old parser) ---
+            if isinstance(potential_data, dict) and \
+               "action" in potential_data and \
+               "symbol" in potential_data:
+
+                trade_decision_data = potential_data.copy() # Work with a copy
+
+                # Ensure symbol is a string, using company_name as fallback
+                if not isinstance(trade_decision_data.get("symbol"), str) or not trade_decision_data.get("symbol"):
+                    trade_decision_data["symbol"] = company_name
+
+                # Default conviction score for HOLD if missing
+                if trade_decision_data.get("action") == "HOLD" and "conviction_score" not in trade_decision_data:
+                    trade_decision_data["conviction_score"] = 0.0
+
+                # Default conviction score for BUY/SELL if missing, and annotate reason
+                if trade_decision_data.get("action") in ["BUY", "SELL"] and "conviction_score" not in trade_decision_data:
+                    trade_decision_data["conviction_score"] = 0.5  # Default to neutral
+                    current_reason = trade_decision_data.get("reason", "")
+                    default_reason_note = "(Conviction score defaulted as LLM did not provide it)"
+                    trade_decision_data["reason"] = f"{current_reason} {default_reason_note}".strip() if current_reason else default_reason_note
+
+                # Ensure reason is present
+                if "reason" not in trade_decision_data:
+                    trade_decision_data["reason"] = "Reason not provided by LLM."
+            else:
+                # The extracted object was not a valid decision structure
+                print(f"TRADER_NODE (new parser): Extracted JSON missing essential keys. Parsed: {str(potential_data)[:200]} from LLM output: {raw_llm_output_for_fallback[:500]}")
+                # trade_decision_data remains None, will be handled by the fallback below
+
+        # Fallback if no JSON found or if the first found JSON was invalid
+        if not trade_decision_data:
+            if not parsed_json_list: # Specifically if no JSON was found at all
+                 print(f"TRADER_NODE (new parser): No JSON objects found in LLM output. Raw: '{raw_llm_output_for_fallback[:500]}...'")
+            # If parsed_json_list was not empty but trade_decision_data is still None, it means the first JSON was invalid (message printed above)
+
+            trade_decision_data = {
+                "action": "HOLD",
+                "symbol": company_name, # Use company_name directly
+                "conviction_score": 0.0,
+                "reason": f"Failed to parse valid JSON decision from LLM. Raw output snippet: {raw_llm_output_for_fallback[:200]}..."
+            }
 
         return {
-            "messages": [response],
+            "messages": [response], # Keep raw LLM response for debugging
             "trader_investment_plan": trade_decision_data,
             "final_trade_decision": trade_decision_data,
             "sender": name,
