@@ -563,6 +563,47 @@ def run_trading_cycle(ticker_to_potentially_trade): # RENAMED and parameter clar
     # The agent_advice structure might need adjustment if it was central to passing data between these;
     # however, new_trade_decision_result and position_management_advice are now handled more directly.
 
+    # --- Reflection Step ---
+    # Placeholder for determining actual returns/losses from the actions taken in this cycle.
+    # This is a complex task and would require tracking trades, their outcomes,
+    # and attributing them to the agent's decisions within this cycle.
+    # For now, we'll simulate a pseudo outcome.
+    # `acted_in_cycle` contains symbols for which new trades were made or existing positions were managed (excluding simple HOLDs from management advice).
+
+    actions_taken_summary = {
+        "new_trade_actions": new_trade_decision_result if new_trade_decision_result and new_trade_decision_result.get("decision") not in ["NONE", "HOLD"] else None,
+        "managed_positions_actions": [adv for adv in position_management_advice if adv.get("action") not in ["HOLD"]]
+    }
+
+    if actions_taken_summary["new_trade_actions"] or actions_taken_summary["managed_positions_actions"]:
+        print(f"\n--- Reflecting on Cycle's Actions for {ticker_to_potentially_trade} ---")
+        # In a real system, you'd calculate actual P&L or use a more sophisticated evaluation.
+        # For this placeholder, we'll just pass a simple string indicating an outcome.
+        # The structure of returns_losses should be what `reflector.py` expects.
+        # Let's assume it's a string for now, but it could be a dict with P&L, etc.
+        pseudo_returns_losses = f"Simulated outcome for cycle involving {ticker_to_potentially_trade}: Positive (Placeholder)"
+        if not acted_in_cycle and not any(adv.get('action') not in ["HOLD"] for adv in position_management_advice):
+            pseudo_returns_losses = f"Simulated outcome for cycle involving {ticker_to_potentially_trade}: No significant actions taken, market observed."
+
+        # Ensure trading_agent (which is an instance of TradingAgentsGraph) is in scope. It's global in this script.
+        try:
+            # The trading_agent.curr_state should have been updated by the .propagate() call
+            # which is implicitly part of get_new_trade_decision and get_portfolio_management_advice
+            # if they internally call propagate for the full analysis.
+            # If trading_agent.curr_state is not set correctly by these calls, reflection might be on stale or no data.
+            # This depends on TradingAgentsGraph.get_new_trade_decision & get_portfolio_management_advice setting self.curr_state
+            if trading_agent.curr_state: # Check if curr_state is populated
+                 print(f"Calling reflect_and_remember for {ticker_to_potentially_trade}. Current agent state for reflection pertains to: {trading_agent.curr_state.get('company_of_interest')}")
+                 trading_agent.reflect_and_remember(pseudo_returns_losses)
+                 print("Reflection complete.")
+            else:
+                 print(f"Warning: trading_agent.curr_state not set. Skipping reflection for {ticker_to_potentially_trade}.")
+        except Exception as e:
+            print(f"Error during reflection step for {ticker_to_potentially_trade}: {e}")
+    else:
+        print(f"\n--- No significant actions taken in this cycle for {ticker_to_potentially_trade}. Skipping reflection. ---")
+
+
     print(f"\n--- Trading cycle complete for {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---")
 
 # Helper function to check if a trade was executed (placeholder for actual return value from execute_trade_logic)
