@@ -10,8 +10,15 @@ from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
 
+import uuid # For generating unique decision IDs
+
 #os api method for now only
 # IMPORTANT: This MUST be a real OpenAI API key for embeddings to work.
+
+# --- Global Trade Log for Agent-Advised Trades ---
+# This is a simple in-memory log. For persistence, a database or file storage would be needed.
+AGENT_ADVISED_TRADES_LOG = []
+
 
 # --- Alpaca API Configuration ---
 # WARNING: API keys are hardcoded below as per user request.
