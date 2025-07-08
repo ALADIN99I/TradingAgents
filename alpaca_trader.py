@@ -563,48 +563,134 @@ def run_trading_cycle(ticker_to_potentially_trade): # RENAMED and parameter clar
     # The agent_advice structure might need adjustment if it was central to passing data between these;
     # however, new_trade_decision_result and position_management_advice are now handled more directly.
 
-    # --- Reflection Step ---
-    # Placeholder for determining actual returns/losses from the actions taken in this cycle.
-    # This is a complex task and would require tracking trades, their outcomes,
-    # and attributing them to the agent's decisions within this cycle.
-    # For now, we'll simulate a pseudo outcome.
-    # `acted_in_cycle` contains symbols for which new trades were made or existing positions were managed (excluding simple HOLDs from management advice).
+    # --- Determine Outcome for Reflection ---
+    outcome_description_for_memory = "No significant decision on primary ticker to evaluate this cycle."
+    evaluated_decision_details = None
+    price_at_decision = None
 
-    actions_taken_summary = {
-        "new_trade_actions": new_trade_decision_result if new_trade_decision_result and new_trade_decision_result.get("decision") not in ["NONE", "HOLD"] else None,
-        "managed_positions_actions": [adv for adv in position_management_advice if adv.get("action") not in ["HOLD"]]
-    }
-
-    if actions_taken_summary["new_trade_actions"] or actions_taken_summary["managed_positions_actions"]:
-        print(f"\n--- Reflecting on Cycle's Actions for {ticker_to_potentially_trade} ---")
-        # In a real system, you'd calculate actual P&L or use a more sophisticated evaluation.
-        # For this placeholder, we'll just pass a simple string indicating an outcome.
-        # The structure of returns_losses should be what `reflector.py` expects.
-        # Let's assume it's a string for now, but it could be a dict with P&L, etc.
-        pseudo_returns_losses = f"Simulated outcome for cycle involving {ticker_to_potentially_trade}: Positive (Placeholder)"
-        if not acted_in_cycle and not any(adv.get('action') not in ["HOLD"] for adv in position_management_advice):
-            pseudo_returns_losses = f"Simulated outcome for cycle involving {ticker_to_potentially_trade}: No significant actions taken, market observed."
-
-        # Ensure trading_agent (which is an instance of TradingAgentsGraph) is in scope. It's global in this script.
+    # Prioritize new trade decision for the main ticker_to_potentially_trade for detailed reflection
+    if new_trade_decision_result and \
+       new_trade_decision_result.get("symbol") == ticker_to_potentially_trade and \
+       new_trade_decision_result.get("decision") not in ["NONE", "HOLD"]:
+        evaluated_decision_details = new_trade_decision_result
+        # Try to get a price point around the time the decision was made.
+        # This is tricky because get_new_trade_decision might take time.
+        # For simplicity, fetch latest bar again. A real system might pass price from earlier.
         try:
-            # The trading_agent.curr_state should have been updated by the .propagate() call
-            # which is implicitly part of get_new_trade_decision and get_portfolio_management_advice
-            # if they internally call propagate for the full analysis.
-            # If trading_agent.curr_state is not set correctly by these calls, reflection might be on stale or no data.
-            # This depends on TradingAgentsGraph.get_new_trade_decision & get_portfolio_management_advice setting self.curr_state
-            if trading_agent.curr_state: # Check if curr_state is populated
-                 print(f"Calling reflect_and_remember for {ticker_to_potentially_trade}. Current agent state for reflection pertains to: {trading_agent.curr_state.get('company_of_interest')}")
-                 trading_agent.reflect_and_remember(pseudo_returns_losses)
-                 print("Reflection complete.")
-            else:
-                 print(f"Warning: trading_agent.curr_state not set. Skipping reflection for {ticker_to_potentially_trade}.")
+            latest_bar = data_client.get_stock_latest_bar(StockLatestBarRequest(symbol_or_symbols=[ticker_to_potentially_trade]))
+            if latest_bar and latest_bar.get(ticker_to_potentially_trade):
+                price_at_decision = latest_bar.get(ticker_to_potentially_trade).close
+                print(f"DEBUG: Captured price_at_decision for {ticker_to_potentially_trade}: {price_at_decision}")
         except Exception as e:
-            print(f"Error during reflection step for {ticker_to_potentially_trade}: {e}")
-    else:
-        print(f"\n--- No significant actions taken in this cycle for {ticker_to_potentially_trade}. Skipping reflection. ---")
+            print(f"DEBUG: Could not fetch price_at_decision for {ticker_to_potentially_trade}: {e}")
 
+    if evaluated_decision_details and price_at_decision is not None:
+        outcome_description_for_memory = get_decision_outcome_description(
+            decision_details=evaluated_decision_details,
+            price_at_decision=price_at_decision,
+            data_client=data_client # Pass data_client
+        )
+    elif evaluated_decision_details and price_at_decision is None:
+        # If we had a decision but couldn't get price, create a basic outcome string
+        action = evaluated_decision_details.get("decision")
+        symbol = evaluated_decision_details.get("symbol")
+        conviction = evaluated_decision_details.get("conviction_score", "N/A")
+        agent_reason = evaluated_decision_details.get("reason", "N/A")
+        outcome_description_for_memory = (
+            f"Outcome for {symbol} {action} (Conviction: {conviction}): Evaluation pending. "
+            f"Price at decision time was not available. Agent Reason: '{agent_reason}'."
+        )
+        print(f"DEBUG: Generated outcome for memory (no price_at_decision): {outcome_description_for_memory}")
+
+
+    # --- Reflection Step ---
+    # Reflect if there was a main decision evaluated OR if any other action was taken in the cycle.
+    should_reflect = bool(evaluated_decision_details) or \
+                     (actions_taken_summary["new_trade_actions"] and actions_taken_summary["new_trade_actions"] != evaluated_decision_details) or \
+                     actions_taken_summary["managed_positions_actions"]
+
+    if should_reflect:
+        # The reflection will be about `ticker_to_potentially_trade` if `evaluated_decision_details` is set,
+        # otherwise, it's a more general reflection or uses a fallback description.
+        # `trading_agent.curr_state` should ideally be set to the context of `ticker_to_potentially_trade`
+        # by the `get_new_trade_decision` call.
+
+        reflection_target_ticker = trading_agent.curr_state.get('company_of_interest') if trading_agent.curr_state else ticker_to_potentially_trade
+
+        # Use the detailed outcome if available, otherwise use a generic placeholder for other actions.
+        final_outcome_for_reflection = outcome_description_for_memory
+        if not evaluated_decision_details and (actions_taken_summary["new_trade_actions"] or actions_taken_summary["managed_positions_actions"]):
+            final_outcome_for_reflection = f"General cycle outcome for {reflection_target_ticker}: Actions taken on other symbols or general management. (Placeholder for multi-asset reflection)"
+
+        print(f"\n--- Reflecting on Cycle's Actions, focusing on {reflection_target_ticker} ---")
+        try:
+            if trading_agent.curr_state and trading_agent.curr_state.get('company_of_interest') == reflection_target_ticker:
+                 print(f"Calling reflect_and_remember for {reflection_target_ticker} with outcome: {final_outcome_for_reflection}")
+                 trading_agent.reflect_and_remember(final_outcome_for_reflection)
+                 print("Reflection complete.")
+            elif trading_agent.curr_state:
+                 print(f"Warning: trading_agent.curr_state.company_of_interest ('{trading_agent.curr_state.get('company_of_interest')}') does not match reflection_target_ticker ('{reflection_target_ticker}'). Reflecting with potentially mismatched state.")
+                 trading_agent.reflect_and_remember(final_outcome_for_reflection)
+                 print("Reflection (with potential state mismatch) complete.")
+            else:
+                 print(f"Warning: trading_agent.curr_state not set. Skipping reflection for {reflection_target_ticker}.")
+        except Exception as e:
+            print(f"Error during reflection step for {reflection_target_ticker}: {e}")
+    else:
+        print(f"\n--- No new BUY/SELL decision on {ticker_to_potentially_trade} or other significant actions in this cycle. Skipping detailed reflection. ---")
 
     print(f"\n--- Trading cycle complete for {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---")
+
+
+def get_decision_outcome_description(decision_details: dict, price_at_decision: float, data_client: StockHistoricalDataClient) -> str:
+    """
+    Simulates a short-term outcome for a given decision and returns a descriptive string.
+    NOTE: This is a simplified simulation. A real system would wait for a proper evaluation period.
+    """
+    action = decision_details.get("decision")
+    symbol = decision_details.get("symbol")
+    conviction = decision_details.get("conviction_score", "N/A") # Handle if None
+    agent_reason = decision_details.get("reason", "N/A") # Handle if None
+
+    if not symbol or not action:
+        return "Invalid decision details for outcome evaluation."
+
+    # Simulate fetching price after a very short interval (conceptual)
+    # For this example, we'll just fetch the latest bar again. In a real fast market, it might be different.
+    # A better simulation might add a small random walk or use a 1-minute future bar if available.
+    price_after_decision = price_at_decision # Default if fetch fails
+    try:
+        # To make it slightly more realistic for simulation, let's try to fetch again.
+        # In a very fast test, this might be the same as price_at_decision.
+        time.sleep(0.1) # Tiny delay to potentially get a new tick if market is moving extremely fast / for testing.
+        latest_bar = data_client.get_stock_latest_bar(StockLatestBarRequest(symbol_or_symbols=[symbol]))
+        if latest_bar and latest_bar.get(symbol):
+            price_after_decision = latest_bar.get(symbol).close
+        else:
+            print(f"DEBUG: Could not fetch price_after_decision for {symbol}, using price_at_decision.")
+    except Exception as e:
+        print(f"DEBUG: Error fetching price_after_decision for {symbol}: {e}. Using price_at_decision.")
+
+    if price_at_decision == 0: # Avoid division by zero
+        price_change_percent = 0.0
+    else:
+        price_change_percent = (price_after_decision - price_at_decision) / price_at_decision * 100
+
+    outcome_label = "Neutral"
+    if action == "BUY":
+        if price_change_percent > 0.01: outcome_label = "Positive (Price Increased)"
+        elif price_change_percent < -0.01: outcome_label = "Negative (Price Decreased)"
+    elif action == "SELL": # Assuming SELL is for shorting or closing a long
+        if price_change_percent < -0.01: outcome_label = "Positive (Price Decreased as per SELL)"
+        elif price_change_percent > 0.01: outcome_label = "Negative (Price Increased against SELL)"
+
+    description = (
+        f"Outcome for {symbol} {action} (Conviction: {conviction}): {outcome_label} in simulated short-term. "
+        f"Price at decision: {price_at_decision:.2f}, Price after (simulated): {price_after_decision:.2f} ({price_change_percent:+.2f}% change). "
+        f"Agent Reason: '{agent_reason}'. "
+        f"This outcome tentatively {( 'supports' if (action == 'BUY' and outcome_label.startswith('Positive')) or (action == 'SELL' and outcome_label.startswith('Positive')) else 'contradicts' if (action == 'BUY' and outcome_label.startswith('Negative')) or (action == 'SELL' and outcome_label.startswith('Negative')) else 'is neutral towards')} the agent's reasoning."
+    )
+    return description
 
 # Helper function to check if a trade was executed (placeholder for actual return value from execute_trade_logic)
 # You'll need to adjust execute_trade_logic to return a boolean indicating success/failure or if a trade was made.
